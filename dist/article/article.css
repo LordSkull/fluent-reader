@@ -137,3 +137,35 @@ article blockquote {
     margin: 1em 0;
     padding: 0 40px;
 }
+
+/* ANSA readable layout v2 */
+/* Applies only to ANSA content successfully extracted in full-text mode. */
+body.ansa-reading:not(.vertical) #main { max-width: 660px; }
+body.ansa-reading:not(.vertical) article {
+    line-height: 1.75;
+    overflow-wrap: break-word;
+}
+body.ansa-reading:not(.vertical) article p {
+    margin: 0 0 1.05em;
+}
+body.ansa-reading:not(.vertical) article p:last-child { margin-bottom: 0; }
+body.ansa-reading:not(.vertical) #main > p.title {
+    line-height: 1.42;
+    margin-bottom: 0.45em;
+}
+body.ansa-reading:not(.vertical) #main > p.date {
+    margin-top: 0;
+    margin-bottom: 1.6em;
+}
+@media (max-width: 780px) {
+    body.ansa-reading:not(.vertical) {
+        padding-left: 32px;
+        padding-right: 32px;
+    }
+}
+@media (max-width: 480px) {
+    body.ansa-reading:not(.vertical) {
+        padding-left: 20px;
+        padding-right: 20px;
+    }
+}
