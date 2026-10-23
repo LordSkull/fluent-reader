@@ -35,9 +35,14 @@ jobs:
                   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
               run: gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" > /dev/null
 
+            - name: Install dependencies
+              run: npm install
+
+            - name: Verify article integrity
+              run: npm run check:article-integrity
+
             - name: Build and package the app
               run: |
-                  npm install
                   npm run build
                   npm run package-linux
 

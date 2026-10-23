@@ -12,9 +12,14 @@ jobs:
         steps:
             - uses: actions/checkout@v2
 
+            - name: Install dependencies
+              run: npm install
+
+            - name: Verify article integrity
+              run: npm run check:article-integrity
+
             - name: Build and package the app
               run: |
-                  npm install
                   npm run build
                   npm run package-win-ci
 
