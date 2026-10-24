@@ -7,7 +7,7 @@ module.exports = [
     {
         mode: "production",
         stats: "minimal",
-        entry: "./src/electron.ts",
+        entry: "./src/bootstrap.ts",
         target: "electron-main",
         externals: {
             "better-sqlite3": "commonjs better-sqlite3",

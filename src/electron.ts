@@ -5,12 +5,7 @@ import performUpdate from "./main/update-scripts"
 import { WindowManager } from "./main/window"
 import { initDB } from "./main/db"
 
-if (!process.mas) {
-    const locked = app.requestSingleInstanceLock()
-    if (!locked) {
-        app.quit()
-    }
-}
+// Loaded by bootstrap.ts once this instance holds the single-instance lock.
 
 if (!app.isPackaged) app.setAppUserModelId(process.execPath)
 else if (process.platform === "win32")

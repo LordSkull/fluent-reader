@@ -25,7 +25,7 @@ npm run build
 ```
 
 This runs `webpack --config ./webpack.config.js`, which produces three bundles in `dist/`:
-- `electron.js` — Electron main process (from `src/electron.ts`)
+- `electron.js` — Electron main process (from `src/bootstrap.ts`, which loads `src/electron.ts`)
 - `preload.js` — Preload script (from `src/preload.ts`)
 - `index.js` + `index.html` — Renderer/React app (from `src/index.tsx`)
 
@@ -109,7 +109,8 @@ Both CI pipelines run `npm install` then `npm run build`. There are no lint or t
 
 | Path | Description |
 |---|---|
-| `electron.ts` | **Electron main process** entry. Creates app menu, initializes `WindowManager`, calls `initDB`. |
+| `bootstrap.ts` | **Electron main process** entry. Imports only `electron`, requests the single-instance lock (skipped on MAS) and loads `electron.ts` only when it holds the lock. Keep application imports out of it. |
+| `electron.ts` | **Main process application**. Creates app menu, initializes `WindowManager`, calls `initDB`. |
 | `preload.ts` | **Preload script**. Exposes `settingsBridge`, `utilsBridge`, and `dbBridge` via `contextBridge`. |
 | `index.tsx` | **Renderer entry**. Mounts React `<Root>` with Redux `<Provider>`. |
 | `schema-types.ts` | Shared TypeScript enums and types (ViewType, ThemeSettings, StoredRule, etc.) |
