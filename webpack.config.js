@@ -1,3 +1,4 @@
+const path = require("path")
 const HtmlWebpackPlugin = require("html-webpack-plugin")
 const NodePolyfillPlugin = require("node-polyfill-webpack-plugin")
 const { GriffelPlugin } = require("@griffel/webpack-plugin")
@@ -63,6 +64,15 @@ module.exports = [
         devtool: "source-map",
         performance: {
             hints: false,
+        },
+        resolve: {
+            alias: {
+                // Unmodified upstream bundle; see vendor/lovefield/README.md.
+                lovefield$: path.resolve(
+                    __dirname,
+                    "vendor/lovefield/lovefield.min.js"
+                ),
+            },
         },
         module: {
             rules: [

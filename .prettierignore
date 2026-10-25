@@ -2,6 +2,7 @@ node_modules
 dist/**/*.js
 dist/**/*.js.map
 dist/griffel.css
+vendor/lovefield/lovefield.min.js
 bin/*
 .DS_Store
 *.provisionprofile
