@@ -1,0 +1,15 @@
+{
+    "source": {
+        "package": "@jocmp/mercury-parser",
+        "version": "3.1.1",
+        "tarball": "https://registry.npmjs.org/@jocmp/mercury-parser/-/mercury-parser-3.1.1.tgz",
+        "integrity": "sha512-L8x89TB9a586vXa5tnHcwXp+vpXP9DHV/uxpEMTa2tihFBePNko5WaFlQ101k/WKa7mQsxGUnGp+s8JXbNx+mw==",
+        "gitHead": "5ca8cbe50e225ccd5079d4a7d317d800c95f2bac",
+        "file": "package/dist/mercury.web.js"
+    },
+    "asset": {
+        "path": "dist/article/mercury.web.js",
+        "sha256": "0df389318de67247ed27306de1eb5e46ce70361a353499ee6cb0d76b070f1875"
+    },
+    "notices": "dist/article/THIRD_PARTY_NOTICES.txt"
+}

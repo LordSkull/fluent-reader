@@ -39,6 +39,18 @@ npm run drizzle:generate
 
 This runs `drizzle-kit generate` using `drizzle.config.ts` and writes SQL migration files to `dist/drizzle/`. Run this whenever `src/db/schema.ts` changes, then commit the generated files. The `dist/drizzle/` directory is **not** gitignored — migration files are tracked as source.
 
+### Mercury article bundle
+
+`dist/article/mercury.web.js` is the vendored browser bundle of `@jocmp/mercury-parser`; Mercury is **not** an npm dependency. `build/mercury-asset.json` pins the source tarball and the bundle's SHA-256. `npm run check:article-integrity` (also run after every build) is read-only and fails if the bundle does not match the pinned digest or if the CSP/SRI hashes in `dist/article/article.html` are stale. `npm run update:article-integrity` (run before every build) only rewrites those HTML hashes, e.g. after an intentional `article.js` change; it never modifies the bundle or the manifest.
+
+To update Mercury deliberately, as a reviewed change:
+
+1. `npm view @jocmp/mercury-parser@<version> dist.tarball dist.integrity gitHead`
+2. In a temporary directory, `npm pack @jocmp/mercury-parser@<version>` and check that the tarball's SHA-512 equals `dist.integrity`.
+3. Copy `package/dist/mercury.web.js` from the tarball over `dist/article/mercury.web.js`.
+4. Update every field of `build/mercury-asset.json`, and update `dist/article/THIRD_PARTY_NOTICES.txt` from the bundle's source map and the upstream lockfile at `gitHead`.
+5. Run `npm run update:article-integrity` and `npm run build`, then test ANSA and non-ANSA articles.
+
 ### Run the app
 
 ```bash

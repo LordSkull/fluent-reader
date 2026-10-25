@@ -1,17 +1,20 @@
 const { createHash } = require("node:crypto")
-const { existsSync, readFileSync, writeFileSync } = require("node:fs")
+const { readFileSync, writeFileSync } = require("node:fs")
 const path = require("node:path")
 
 const articleDirectory = path.join(__dirname, "../dist/article")
 const htmlPath = path.join(articleDirectory, "article.html")
 const mercuryPath = path.join(articleDirectory, "mercury.web.js")
 const articleScriptPath = path.join(articleDirectory, "article.js")
+const manifestPath = path.join(__dirname, "mercury-asset.json")
 const htmlDisplayPath = "dist/article/article.html"
 const mercuryDisplayPath = "dist/article/mercury.web.js"
 const articleScriptDisplayPath = "dist/article/article.js"
+const manifestDisplayPath = "build/mercury-asset.json"
 const updateCommand = "npm run update:article-integrity"
 const scriptSources = ["mercury.web.js", "article.js"]
 const sha256SourcePattern = /^'sha256-[A-Za-z0-9+/]{43}='$/
+const sha256HexPattern = /^[0-9a-f]{64}$/
 
 class IntegrityError extends Error {}
 
@@ -34,19 +37,47 @@ function readRequiredFile(filePath, displayPath, missingHint = "") {
     }
 }
 
-function readMercurySource() {
+function readPinnedMercuryDigest() {
+    const contents = readRequiredFile(manifestPath, manifestDisplayPath)
+    let manifest
     try {
-        return readFileSync(
-            require.resolve("@jocmp/mercury-parser/dist/mercury.web.js")
-        )
-    } catch (error) {
-        if (error?.code === "MODULE_NOT_FOUND") {
-            fail(
-                "Missing Mercury Parser dependency. Run npm install before updating article integrity."
-            )
-        }
-        throw error
+        manifest = JSON.parse(contents.toString("utf8"))
+    } catch {
+        fail(`Invalid JSON in ${manifestDisplayPath}`)
     }
+
+    const asset = manifest?.asset
+    if (asset?.path !== mercuryDisplayPath) {
+        fail(`${manifestDisplayPath} must pin asset.path ${mercuryDisplayPath}`)
+    }
+    if (
+        typeof asset.sha256 !== "string" ||
+        !sha256HexPattern.test(asset.sha256)
+    ) {
+        fail(
+            `${manifestDisplayPath} must pin asset.sha256 as 64 lowercase hex characters`
+        )
+    }
+    return asset.sha256
+}
+
+// The Mercury browser bundle is a vendored, immutable asset. It is only
+// accepted when it matches the digest pinned from the verified npm tarball;
+// this script never rewrites the bundle or the pinned digest.
+function readMercurySource() {
+    const expectedDigest = readPinnedMercuryDigest()
+    const contents = readRequiredFile(
+        mercuryPath,
+        mercuryDisplayPath,
+        "Restore it from Git."
+    )
+    const actualDigest = createHash("sha256").update(contents).digest("hex")
+    if (actualDigest !== expectedDigest) {
+        fail(
+            `Unexpected contents: ${mercuryDisplayPath} has SHA-256 ${actualDigest}, but ${manifestDisplayPath} pins ${expectedDigest}. Restore the bundle from Git; a new Mercury version must be vendored and pinned deliberately.`
+        )
+    }
+    return contents
 }
 
 function calculateIntegrity(contents) {
@@ -152,18 +183,7 @@ function createScripts(mercuryContents, articleScriptContents) {
     }))
 }
 
-function verifyIntegrity(mercurySource) {
-    const mercuryContents = readRequiredFile(
-        mercuryPath,
-        mercuryDisplayPath,
-        `Run ${updateCommand}.`
-    )
-    if (!mercuryContents.equals(mercurySource)) {
-        fail(
-            `Stale file: ${mercuryDisplayPath} does not match the installed Mercury Parser. Run ${updateCommand}.`
-        )
-    }
-
+function verifyIntegrity(mercuryContents) {
     const articleScriptContents = readRequiredFile(
         articleScriptPath,
         articleScriptDisplayPath
@@ -191,24 +211,16 @@ function updateIntegrity(mercurySource) {
         createScripts(mercurySource, articleScriptContents)
     )
 
-    let mercuryChanged = true
-    if (existsSync(mercuryPath)) {
-        mercuryChanged = !readRequiredFile(
-            mercuryPath,
-            mercuryDisplayPath
-        ).equals(mercurySource)
-    }
     const htmlChanged = updatedHtml !== html
 
-    // All input and HTML structure validation is complete before either write.
-    if (mercuryChanged) writeFileSync(mercuryPath, mercurySource)
+    // All input and HTML structure validation is complete before the write.
     if (htmlChanged) {
         writeFileSync(htmlPath, updatedHtml)
     }
 
     verifyIntegrity(mercurySource)
     console.log(
-        mercuryChanged || htmlChanged
+        htmlChanged
             ? "Article CSP and SRI hashes updated"
             : "Article CSP and SRI hashes are already current"
     )
