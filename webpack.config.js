@@ -1,6 +1,6 @@
 const path = require("path")
+const { ProvidePlugin } = require("webpack")
 const HtmlWebpackPlugin = require("html-webpack-plugin")
-const NodePolyfillPlugin = require("node-polyfill-webpack-plugin")
 const { GriffelPlugin } = require("@griffel/webpack-plugin")
 const MiniCssExtractPlugin = require("mini-css-extract-plugin")
 
@@ -73,6 +73,14 @@ module.exports = [
                     "vendor/lovefield/lovefield.min.js"
                 ),
             },
+            // Only the Node builtins required by rss-parser, sax and xml2js.
+            // Any other builtin (e.g. crypto) must fail the build.
+            fallback: {
+                http: require.resolve("stream-http"),
+                https: require.resolve("https-browserify"),
+                stream: require.resolve("stream-browserify"),
+                timers: require.resolve("timers-browserify"),
+            },
         },
         module: {
             rules: [
@@ -104,9 +112,8 @@ module.exports = [
             filename: "index.js",
         },
         plugins: [
-            new NodePolyfillPlugin({
-                additionalAliases: ["process"],
-                excludeAliases: ["Buffer"],
+            new ProvidePlugin({
+                process: "process/browser",
             }),
             new HtmlWebpackPlugin({
                 template: "./src/index.html",
