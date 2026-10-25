@@ -70,5 +70,10 @@
   },
   "dependencies": {
     "better-sqlite3": "^13.0.3"
+  },
+  "overrides": {
+    "@esbuild-kit/core-utils": {
+      "esbuild": "^0.25.4"
+    }
   }
 }
