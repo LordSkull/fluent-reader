@@ -26,6 +26,17 @@ import {
     SYNC_LOCAL_ITEMS,
 } from "./service"
 
+// The characters String.prototype.trim removes, for matching in SQLite.
+export const LINK_WHITESPACE =
+    "\t\n\v\f\r \u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006" +
+    "\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff"
+
+// Some feeds indent the text of <link>. Only the surrounding whitespace is
+// removed; the URL itself is kept as published.
+export function trimLink(link: unknown) {
+    return typeof link === "string" ? link.trim() : ""
+}
+
 export class RSSItem {
     _id: number
     source: number
@@ -56,7 +67,7 @@ export class RSSItem {
             )
         }
         this.title = item.title || intl.get("article.untitled")
-        this.link = item.link || ""
+        this.link = trimLink(item.link)
         this.fetchedDate = new Date()
         this.date = getValidDate(item.isoDate, item.pubDate, this.fetchedDate)
         this.creator = item.creator || item.author

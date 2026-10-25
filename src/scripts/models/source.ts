@@ -1,6 +1,6 @@
 import { SourceGroup } from "../../schema-types"
 import intl from "react-intl-universal"
-import { eq, and, or, isNull, max, count } from "drizzle-orm"
+import { eq, and, or, isNull, max, count, sql } from "drizzle-orm"
 import { database, sourcesTable, itemsTable, init } from "../db"
 import { findValidDate } from "../date"
 import {
@@ -12,6 +12,7 @@ import {
 } from "../utils"
 import {
     RSSItem,
+    LINK_WHITESPACE,
     insertItems,
     ItemActionTypes,
     FETCH_ITEMS,
@@ -81,7 +82,8 @@ export class RSSSource {
     ): Promise<RSSItem> {
         const legacyMatch = and(
             eq(itemsTable.title, i.title),
-            eq(itemsTable.link, i.link),
+            // i.link is trimmed, but links stored by older versions may not be.
+            sql`trim(${itemsTable.link}, ${LINK_WHITESPACE}) = ${i.link}`,
             hasPublicationDate ? eq(itemsTable.date, i.date) : undefined
         )
         // Migrated articles have no GUID. Use the fallback match when either side

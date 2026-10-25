@@ -14,6 +14,7 @@ import {
     RSSItem,
     TOGGLE_HIDDEN,
     applyItemReduction,
+    trimLink,
 } from "./item"
 import { ActionStatus, AppThunk, mergeSortedArrays } from "../utils"
 import { PageActionTypes, SELECT_PAGE, PageType, APPLY_FILTER } from "./page"
@@ -137,13 +138,17 @@ export class RSSFeed {
                 }
             }
         }
-        return (await database
+        const items = (await database
             .select()
             .from(itemsTable)
             .where(and(...conditions))
             .orderBy(desc(itemsTable.date))
             .offset(skip)
             .limit(LOAD_QUANTITY)) as unknown as RSSItem[]
+        // Items saved before links were trimmed on import are not rewritten
+        // by later fetches, so their stored links may still need trimming.
+        for (const item of items) item.link = trimLink(item.link)
+        return items
     }
 }
 
