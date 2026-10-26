@@ -8,8 +8,10 @@ import {
     FeedActionTypes,
     INIT_FEED,
 } from "./feed"
+import { eq } from "drizzle-orm"
+import { database, itemsTable } from "../db"
 import { getWindowBreakpoint, AppThunk, ActionStatus } from "../utils"
-import { RSSItem, markRead } from "./item"
+import { RSSItem, markRead, hydrateItem, trimLink } from "./item"
 import { SourceActionTypes, DELETE_SOURCE } from "./source"
 import { toggleMenu } from "./app"
 import { ViewType, ViewConfigs } from "../../schema-types"
@@ -145,12 +147,31 @@ export function showItem(feedId: string, item: RSSItem): AppThunk {
         }
     }
 }
-export function showItemFromId(iid: number): AppThunk {
-    return (dispatch, getState) => {
-        const state = getState()
-        const item = state.items[iid]
-        if (!item.hasRead) dispatch(markRead(item))
-        if (item) dispatch(showItem(null, item))
+// Opens an article outside of its feed, e.g. from the logs. The article is
+// read from the database, as it may have been deleted or never loaded.
+export function showItemFromId(iid: number): AppThunk<Promise<void>> {
+    return async (dispatch, getState) => {
+        if (!Number.isSafeInteger(iid) || iid <= 0) return
+        let item: RSSItem
+        try {
+            const rows = (await database
+                .select()
+                .from(itemsTable)
+                .where(eq(itemsTable._id, iid))
+                .limit(1)) as unknown as RSSItem[]
+            item = rows[0]
+        } catch (err) {
+            // A failed read does not mean that the article was deleted.
+            console.error(err)
+            return
+        }
+        if (!item || !getState().sources.hasOwnProperty(item.source)) return
+        item.link = trimLink(item.link)
+        dispatch(hydrateItem(item))
+        if (!item.hasRead) {
+            dispatch(markRead(item)).catch(err => console.error(err))
+        }
+        dispatch(showItem(null, item))
     }
 }
 

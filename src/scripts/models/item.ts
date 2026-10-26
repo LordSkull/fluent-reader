@@ -132,6 +132,7 @@ export const MARK_ALL_READ = "MARK_ALL_READ"
 export const MARK_UNREAD = "MARK_UNREAD"
 export const TOGGLE_STARRED = "TOGGLE_STARRED"
 export const TOGGLE_HIDDEN = "TOGGLE_HIDDEN"
+export const HYDRATE_ITEM = "HYDRATE_ITEM"
 
 interface FetchItemsAction {
     type: typeof FETCH_ITEMS
@@ -170,6 +171,11 @@ interface ToggleHiddenAction {
     item: RSSItem
 }
 
+interface HydrateItemAction {
+    type: typeof HYDRATE_ITEM
+    item: RSSItem
+}
+
 export type ItemActionTypes =
     | FetchItemsAction
     | MarkReadAction
@@ -177,6 +183,14 @@ export type ItemActionTypes =
     | MarkUnreadAction
     | ToggleStarredAction
     | ToggleHiddenAction
+    | HydrateItemAction
+
+// Stores an article just read from the database, replacing any copy in
+// memory. Feeds are not changed.
+export const hydrateItem = (item: RSSItem): ItemActionTypes => ({
+    type: HYDRATE_ITEM,
+    item: item,
+})
 
 export function fetchItemsRequest(fetchCount = 0): ItemActionTypes {
     return {
@@ -533,6 +547,11 @@ export function itemReducer(
                 }
                 default:
                     return state
+            }
+        case HYDRATE_ITEM:
+            return {
+                ...state,
+                [action.item._id]: action.item,
             }
         case MARK_UNREAD:
         case MARK_READ:

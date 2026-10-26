@@ -293,7 +293,7 @@ export function exitSettings(): AppThunk<Promise<void>> {
                 dispatch(selectAllArticles(true))
                 await dispatch(initFeeds(true))
                 dispatch(toggleSettings(false))
-                freeMemory()
+                dispatch(freeMemory())
             } else {
                 dispatch(toggleSettings(false))
             }
@@ -304,8 +304,10 @@ export function exitSettings(): AppThunk<Promise<void>> {
 function freeMemory(): AppThunk {
     return (dispatch, getState) => {
         const iids = new Set<number>()
+        // A feed whose reload failed is not loaded but keeps its old iids,
+        // which must still resolve to items.
         for (let feed of Object.values(getState().feeds)) {
-            if (feed.loaded) feed.iids.forEach(iids.add, iids)
+            feed.iids.forEach(iids.add, iids)
         }
         dispatch({
             type: FREE_MEMORY,
