@@ -16,6 +16,7 @@ import { RootState } from "../../scripts/reducer"
 
 const mapStateToProps = (state: RootState) => ({
     sources: state.sources,
+    groups: state.groups,
 })
 
 const mapDispatchToProps = (dispatch: AppDispatch) => ({

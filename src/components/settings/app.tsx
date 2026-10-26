@@ -6,7 +6,7 @@ import {
     calculateItemSize,
     getSearchEngineName,
 } from "../../scripts/utils"
-import { ThemeSettings, SearchEngines } from "../../schema-types"
+import { ThemeSettings, SearchEngines, SourceGroup } from "../../schema-types"
 import {
     getThemeSettings,
     setThemeSettings,
@@ -35,6 +35,7 @@ import {
 
 type AppTabProps = {
     sources: SourceState
+    groups: SourceGroup[]
     setLanguage: (option: string) => void
     setFetchInterval: (interval: number) => void
     countArticles: (filter: CleanupFilter) => Promise<number>
@@ -54,6 +55,7 @@ type CleanupSelection = {
     deleteIndex: string
     cleanupScope: CleanupScope
     cleanupSid: number
+    cleanupGid: number
 }
 
 type AppTabState = CleanupSelection & {
@@ -79,6 +81,7 @@ class AppTab extends React.Component<AppTabProps, AppTabState> {
             deleteIndex: null,
             cleanupScope: "all",
             cleanupSid: null,
+            cleanupGid: null,
             cleanupPreview: null,
             cleanupMessage: null,
             deleting: false,
@@ -157,6 +160,33 @@ class AppTab extends React.Component<AppTabProps, AppTabState> {
         }))
     }
 
+    // User groups only, keyed by gid and sorted by name; duplicate names are
+    // numbered in the order the groups were created.
+    cleanupGroupOptions = (): IDropdownOption[] => {
+        const groups = this.props.groups
+            .filter(group => group.isMultiple === true)
+            .sort(
+                (a, b) =>
+                    String(a.name).localeCompare(String(b.name)) ||
+                    a.gid - b.gid
+            )
+        const names = new Map<string, number>()
+        for (let group of groups)
+            names.set(group.name, (names.get(group.name) || 0) + 1)
+        const numbers = new Map<string, number>()
+        return groups.map(group => {
+            const n = (numbers.get(group.name) || 0) + 1
+            numbers.set(group.name, n)
+            return {
+                key: group.gid,
+                text:
+                    names.get(group.name) > 1
+                        ? `${group.name} (${n})`
+                        : group.name,
+            }
+        })
+    }
+
     // Each selection gets a new sequence number. Counts of older selections
     // are discarded, and the DangerButton is keyed by it so that a pending
     // confirmation never carries over to another selection.
@@ -172,15 +202,17 @@ class AppTab extends React.Component<AppTabProps, AppTabState> {
 
     updateCleanupPreview = () => {
         const seq = ++this.cleanupSeq
-        const { deleteIndex, cleanupScope, cleanupSid } = this.state
+        const { deleteIndex, cleanupScope, cleanupSid, cleanupGid } = this.state
         const filter =
             deleteIndex === null
                 ? null
                 : makeCleanupFilter(
                       parseInt(deleteIndex),
                       cleanupScope,
-                      cleanupSid,
-                      this.props.sources
+                      cleanupScope === "group" ? cleanupGid : cleanupSid,
+                      this.props.sources,
+                      Date.now(),
+                      this.props.groups
                   )
         if (filter === null) {
             this.setState({ cleanupPreview: null })
@@ -216,6 +248,7 @@ class AppTab extends React.Component<AppTabProps, AppTabState> {
                 deleteIndex: this.state.deleteIndex,
                 cleanupScope: this.state.cleanupScope,
                 cleanupSid: this.state.cleanupSid,
+                cleanupGid: this.state.cleanupGid,
                 ...selection,
                 cleanupMessage: null,
             },
@@ -238,6 +271,10 @@ class AppTab extends React.Component<AppTabProps, AppTabState> {
         this.selectCleanup({ cleanupSid: item ? (item.key as number) : null })
     }
 
+    cleanupGroupChange = (_, item: IDropdownOption) => {
+        this.selectCleanup({ cleanupGid: item ? (item.key as number) : null })
+    }
+
     componentDidUpdate(prevProps: AppTabProps) {
         const sid = this.state.cleanupSid
         if (
@@ -246,6 +283,24 @@ class AppTab extends React.Component<AppTabProps, AppTabState> {
             !(sid in this.props.sources)
         ) {
             this.selectCleanup({ cleanupSid: null })
+        }
+        const gid = this.state.cleanupGid
+        if (prevProps.groups !== this.props.groups && gid !== null) {
+            const find = (groups: SourceGroup[]) =>
+                groups.find(g => g.isMultiple === true && g.gid === gid)
+            // Compared as sets: reordering the sources changes nothing.
+            const members = (group: SourceGroup) =>
+                group ? [...new Set(group.sids)].sort().join() : null
+            const group = find(this.props.groups)
+            if (!group) {
+                this.selectCleanup({ cleanupGid: null })
+            } else if (
+                this.state.cleanupScope === "group" &&
+                members(group) !== members(find(prevProps.groups))
+            ) {
+                // Replaces the preview and any pending confirmation.
+                this.selectCleanup({})
+            }
         }
     }
 
@@ -261,16 +316,35 @@ class AppTab extends React.Component<AppTabProps, AppTabState> {
     cleanupSummary = (): string => {
         if (this.state.deleting) return intl.get("app.cleanupDeleting")
         const preview = this.state.cleanupPreview
-        if (preview === null) return null
+        if (preview === null) {
+            const { cleanupScope, cleanupGid, deleteIndex } = this.state
+            // A group without sources yields no filter: nothing to delete.
+            return cleanupScope === "group" &&
+                cleanupGid !== null &&
+                deleteIndex !== null
+                ? intl.get("app.cleanupNone")
+                : null
+        }
         if (preview.failed) return intl.get("app.cleanupCountFailed")
         if (preview.count === undefined) return intl.get("app.cleanupCounting")
         if (preview.count === 0) return intl.get("app.cleanupNone")
-        const { scope, sid, days } = preview.filter
+        const { scope, sid, gid, days } = preview.filter
         if (scope === "all") {
             const params = { count: preview.count, days: days }
             return days === 0
                 ? intl.get("app.cleanupPreviewAllEvery", params)
                 : intl.get("app.cleanupPreviewAll", params)
+        }
+        if (scope === "group") {
+            const option = this.cleanupGroupOptions().find(o => o.key === gid)
+            const params = {
+                count: preview.count,
+                days: days,
+                name: option ? option.text : String(gid),
+            }
+            return days === 0
+                ? intl.get("app.cleanupPreviewGroupEvery", params)
+                : intl.get("app.cleanupPreviewGroup", params)
         }
         const option = this.cleanupSourceOptions().find(o => o.key === sid)
         const params = {
@@ -500,6 +574,7 @@ class AppTab extends React.Component<AppTabProps, AppTabState> {
                     value="source"
                     label={intl.get("app.cleanupOneSource")}
                 />
+                <Radio value="group" label={intl.get("app.cleanupOneGroup")} />
             </RadioGroup>
             {this.state.cleanupScope === "source" && (
                 <Stack horizontal>
@@ -510,6 +585,19 @@ class AppTab extends React.Component<AppTabProps, AppTabState> {
                             selectedKey={this.state.cleanupSid}
                             disabled={this.cleanupLocked()}
                             onChange={this.cleanupSourceChange}
+                        />
+                    </Stack.Item>
+                </Stack>
+            )}
+            {this.state.cleanupScope === "group" && (
+                <Stack horizontal>
+                    <Stack.Item grow>
+                        <Dropdown
+                            placeholder={intl.get("app.cleanupSelectGroup")}
+                            options={this.cleanupGroupOptions()}
+                            selectedKey={this.state.cleanupGid}
+                            disabled={this.cleanupLocked()}
+                            onChange={this.cleanupGroupChange}
                         />
                     </Stack.Item>
                 </Stack>
