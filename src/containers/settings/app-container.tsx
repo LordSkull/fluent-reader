@@ -4,12 +4,19 @@ import {
     saveSettings,
     setupAutoFetch,
 } from "../../scripts/models/app"
-import { database, itemsTable } from "../../scripts/db"
-import { lt, sql } from "drizzle-orm"
 import AppTab from "../../components/settings/app"
 import { importAll } from "../../scripts/settings"
-import { updateUnreadCounts } from "../../scripts/models/source"
+import {
+    CleanupFilter,
+    countArticles,
+    deleteArticles,
+} from "../../scripts/cleanup"
 import { AppDispatch } from "../../scripts/utils"
+import { RootState } from "../../scripts/reducer"
+
+const mapStateToProps = (state: RootState) => ({
+    sources: state.sources,
+})
 
 const mapDispatchToProps = (dispatch: AppDispatch) => ({
     setLanguage: (option: string) => {
@@ -20,16 +27,8 @@ const mapDispatchToProps = (dispatch: AppDispatch) => ({
         window.settings.setFetchInterval(interval)
         dispatch(setupAutoFetch())
     },
-    deleteArticles: async (days: number) => {
-        dispatch(saveSettings())
-        let date = new Date()
-        date.setTime(date.getTime() - days * 86400000)
-        await database.delete(itemsTable).where(lt(itemsTable.date, date))
-        // DELETE leaves reusable pages allocated; explicit cleanup should release them.
-        await database.run(sql`VACUUM`)
-        await dispatch(updateUnreadCounts())
-        dispatch(saveSettings())
-    },
+    countArticles: (filter: CleanupFilter) => dispatch(countArticles(filter)),
+    deleteArticles: (filter: CleanupFilter) => dispatch(deleteArticles(filter)),
     importAll: async () => {
         dispatch(saveSettings())
         let cancelled = await importAll()
@@ -37,5 +36,5 @@ const mapDispatchToProps = (dispatch: AppDispatch) => ({
     },
 })
 
-const AppTabContainer = connect(null, mapDispatchToProps)(AppTab)
+const AppTabContainer = connect(mapStateToProps, mapDispatchToProps)(AppTab)
 export default AppTabContainer

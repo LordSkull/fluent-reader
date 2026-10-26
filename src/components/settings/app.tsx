@@ -24,21 +24,47 @@ import {
 } from "@fluentui/react"
 import { RadioGroup, Radio } from "@fluentui/react-components"
 import DangerButton from "../utils/danger-button"
+import { SourceState } from "../../scripts/models/source"
+import {
+    CLEANUP_PERIODS,
+    CleanupFilter,
+    CleanupResult,
+    CleanupScope,
+    makeCleanupFilter,
+} from "../../scripts/cleanup"
 
 type AppTabProps = {
+    sources: SourceState
     setLanguage: (option: string) => void
     setFetchInterval: (interval: number) => void
-    deleteArticles: (days: number) => Promise<void>
+    countArticles: (filter: CleanupFilter) => Promise<number>
+    deleteArticles: (filter: CleanupFilter) => Promise<CleanupResult>
     importAll: () => Promise<void>
 }
 
-type AppTabState = {
+// count is undefined while counting.
+type CleanupPreview = {
+    seq: number
+    filter: CleanupFilter
+    count?: number
+    failed?: boolean
+}
+
+type CleanupSelection = {
+    deleteIndex: string
+    cleanupScope: CleanupScope
+    cleanupSid: number
+}
+
+type AppTabState = CleanupSelection & {
     pacStatus: boolean
     pacUrl: string
     themeSettings: ThemeSettings
     itemSize: string
     cacheSize: string
-    deleteIndex: string
+    cleanupPreview: CleanupPreview
+    cleanupMessage: string
+    deleting: boolean
 }
 
 class AppTab extends React.Component<AppTabProps, AppTabState> {
@@ -51,6 +77,11 @@ class AppTab extends React.Component<AppTabProps, AppTabState> {
             itemSize: null,
             cacheSize: null,
             deleteIndex: null,
+            cleanupScope: "all",
+            cleanupSid: null,
+            cleanupPreview: null,
+            cleanupMessage: null,
+            deleting: false,
         }
         this.getItemSize()
         this.getCacheSize()
@@ -100,23 +131,213 @@ class AppTab extends React.Component<AppTabProps, AppTabState> {
         window.settings.setSearchEngine(item.key as number)
     }
 
-    deleteOptions = (): IDropdownOption[] => [
-        { key: "7", text: intl.get("app.daysAgo", { days: 7 }) },
-        { key: "14", text: intl.get("app.daysAgo", { days: 14 }) },
-        { key: "21", text: intl.get("app.daysAgo", { days: 21 }) },
-        { key: "28", text: intl.get("app.daysAgo", { days: 28 }) },
-        { key: "0", text: intl.get("app.deleteAll") },
-    ]
+    deleteOptions = (): IDropdownOption[] =>
+        CLEANUP_PERIODS.map(days => ({
+            key: String(days),
+            text:
+                days === 0
+                    ? intl.get("app.deleteAll")
+                    : intl.get("app.daysAgo", { days: days }),
+        }))
+
+    // Sorted by name; duplicate names are told apart by their URL.
+    cleanupSourceOptions = (): IDropdownOption[] => {
+        const sources = Object.values(this.props.sources).sort(
+            (a, b) => a.name.localeCompare(b.name) || a.sid - b.sid
+        )
+        const names = new Map<string, number>()
+        for (let source of sources)
+            names.set(source.name, (names.get(source.name) || 0) + 1)
+        return sources.map(source => ({
+            key: source.sid,
+            text:
+                names.get(source.name) > 1
+                    ? `${source.name} (${source.url})`
+                    : source.name,
+        }))
+    }
+
+    // Each selection gets a new sequence number. Counts of older selections
+    // are discarded, and the DangerButton is keyed by it so that a pending
+    // confirmation never carries over to another selection.
+    cleanupSeq = 0
+    deleting = false
+    unmounted = false
+
+    componentWillUnmount() {
+        this.unmounted = true
+        // Discards the pending count.
+        this.cleanupSeq++
+    }
+
+    updateCleanupPreview = () => {
+        const seq = ++this.cleanupSeq
+        const { deleteIndex, cleanupScope, cleanupSid } = this.state
+        const filter =
+            deleteIndex === null
+                ? null
+                : makeCleanupFilter(
+                      parseInt(deleteIndex),
+                      cleanupScope,
+                      cleanupSid,
+                      this.props.sources
+                  )
+        if (filter === null) {
+            this.setState({ cleanupPreview: null })
+            return
+        }
+        this.setState({ cleanupPreview: { seq: seq, filter: filter } })
+        const setCount = (count: number, failed = false) => {
+            if (seq !== this.cleanupSeq) return
+            this.setState(state =>
+                state.cleanupPreview?.seq === seq
+                    ? {
+                          cleanupPreview: {
+                              ...state.cleanupPreview,
+                              count: count,
+                              failed: failed,
+                          },
+                      }
+                    : null
+            )
+        }
+        this.props.countArticles(filter).then(
+            count => setCount(count),
+            err => {
+                console.error(err)
+                setCount(undefined, true)
+            }
+        )
+    }
+
+    selectCleanup = (selection: Partial<CleanupSelection>) => {
+        this.setState(
+            {
+                deleteIndex: this.state.deleteIndex,
+                cleanupScope: this.state.cleanupScope,
+                cleanupSid: this.state.cleanupSid,
+                ...selection,
+                cleanupMessage: null,
+            },
+            this.updateCleanupPreview
+        )
+    }
 
     deleteChange = (_, item: IDropdownOption) => {
-        this.setState({ deleteIndex: item ? String(item.key) : null })
+        this.selectCleanup({ deleteIndex: item ? String(item.key) : null })
+    }
+
+    cleanupScopeChange = (
+        _: React.FormEvent<HTMLDivElement>,
+        data: { value: string }
+    ) => {
+        this.selectCleanup({ cleanupScope: data.value as CleanupScope })
+    }
+
+    cleanupSourceChange = (_, item: IDropdownOption) => {
+        this.selectCleanup({ cleanupSid: item ? (item.key as number) : null })
+    }
+
+    componentDidUpdate(prevProps: AppTabProps) {
+        const sid = this.state.cleanupSid
+        if (
+            prevProps.sources !== this.props.sources &&
+            sid !== null &&
+            !(sid in this.props.sources)
+        ) {
+            this.selectCleanup({ cleanupSid: null })
+        }
+    }
+
+    // The selection is locked while deleting and while counting it.
+    cleanupLocked = () => {
+        const preview = this.state.cleanupPreview
+        return (
+            this.state.deleting ||
+            (preview !== null && preview.count === undefined && !preview.failed)
+        )
+    }
+
+    cleanupSummary = (): string => {
+        if (this.state.deleting) return intl.get("app.cleanupDeleting")
+        const preview = this.state.cleanupPreview
+        if (preview === null) return null
+        if (preview.failed) return intl.get("app.cleanupCountFailed")
+        if (preview.count === undefined) return intl.get("app.cleanupCounting")
+        if (preview.count === 0) return intl.get("app.cleanupNone")
+        const { scope, sid, days } = preview.filter
+        if (scope === "all") {
+            const params = { count: preview.count, days: days }
+            return days === 0
+                ? intl.get("app.cleanupPreviewAllEvery", params)
+                : intl.get("app.cleanupPreviewAll", params)
+        }
+        const option = this.cleanupSourceOptions().find(o => o.key === sid)
+        const params = {
+            count: preview.count,
+            days: days,
+            name: option ? option.text : String(sid),
+        }
+        return days === 0
+            ? intl.get("app.cleanupPreviewSourceEvery", params)
+            : intl.get("app.cleanupPreviewSource", params)
+    }
+
+    // Drizzle wraps database errors; the cause carries the actual reason.
+    cleanupError = (err: unknown) =>
+        String(err instanceof Error && err.cause ? err.cause : err)
+
+    cleanupResultMessage = (result: CleanupResult) => {
+        if (result.vacuumError)
+            return intl.get("app.cleanupVacuumFailed", {
+                count: result.deleted,
+                error: this.cleanupError(result.vacuumError),
+            })
+        if (result.refreshError)
+            return intl.get("app.cleanupRefreshFailed", {
+                count: result.deleted,
+                error: this.cleanupError(result.refreshError),
+            })
+        return intl.get("app.cleanupDone", { count: result.deleted })
     }
 
     confirmDelete = () => {
-        this.setState({ itemSize: null })
+        const preview = this.state.cleanupPreview
+        // Only the filter of the preview currently shown may be deleted.
+        if (
+            this.deleting ||
+            !preview ||
+            preview.seq !== this.cleanupSeq ||
+            !(preview.count > 0)
+        )
+            return
+        this.deleting = true
+        this.setState({ deleting: true, itemSize: null, cleanupMessage: null })
         this.props
-            .deleteArticles(parseInt(this.state.deleteIndex))
-            .then(() => this.getItemSize())
+            .deleteArticles(preview.filter)
+            .then(
+                result => {
+                    if (this.unmounted) return
+                    this.setState({
+                        cleanupMessage: this.cleanupResultMessage(result),
+                    })
+                },
+                err => {
+                    console.error(err)
+                    if (this.unmounted) return
+                    this.setState({
+                        cleanupMessage: intl.get("app.cleanupFailed", {
+                            error: this.cleanupError(err),
+                        }),
+                    })
+                }
+            )
+            .finally(() => {
+                this.deleting = false
+                if (this.unmounted) return
+                this.setState({ deleting: false }, this.updateCleanupPreview)
+                this.getItemSize()
+            })
     }
 
     languageOptions = (): IDropdownOption[] => [
@@ -270,26 +491,59 @@ class AppTab extends React.Component<AppTabProps, AppTabState> {
             )}
 
             <Label>{intl.get("app.cleanup")}</Label>
+            <RadioGroup
+                value={this.state.cleanupScope}
+                disabled={this.cleanupLocked()}
+                onChange={this.cleanupScopeChange}>
+                <Radio value="all" label={intl.get("app.cleanupAllSources")} />
+                <Radio
+                    value="source"
+                    label={intl.get("app.cleanupOneSource")}
+                />
+            </RadioGroup>
+            {this.state.cleanupScope === "source" && (
+                <Stack horizontal>
+                    <Stack.Item grow>
+                        <Dropdown
+                            placeholder={intl.get("app.cleanupSelectSource")}
+                            options={this.cleanupSourceOptions()}
+                            selectedKey={this.state.cleanupSid}
+                            disabled={this.cleanupLocked()}
+                            onChange={this.cleanupSourceChange}
+                        />
+                    </Stack.Item>
+                </Stack>
+            )}
             <Stack horizontal>
                 <Stack.Item grow>
                     <Dropdown
                         placeholder={intl.get("app.deleteChoices")}
                         options={this.deleteOptions()}
                         selectedKey={this.state.deleteIndex}
+                        disabled={this.cleanupLocked()}
                         onChange={this.deleteChange}
                     />
                 </Stack.Item>
                 <Stack.Item>
                     <DangerButton
+                        key={this.state.cleanupPreview?.seq ?? -1}
                         disabled={
-                            this.state.itemSize === null ||
-                            this.state.deleteIndex === null
+                            this.state.deleting ||
+                            !(this.state.cleanupPreview?.count > 0)
                         }
                         text={intl.get("app.confirmDelete")}
                         onClick={this.confirmDelete}
                     />
                 </Stack.Item>
             </Stack>
+            {this.state.cleanupMessage && (
+                <div className="settings-hint up">
+                    {this.state.cleanupMessage}
+                </div>
+            )}
+            {this.cleanupSummary() && (
+                <div className="settings-hint up">{this.cleanupSummary()}</div>
+            )}
             <span className="settings-hint up">
                 {this.state.itemSize
                     ? intl.get("app.itemSize", { size: this.state.itemSize })
