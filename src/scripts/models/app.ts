@@ -339,17 +339,19 @@ export function setupAutoFetch(): AppThunk {
 
 export function pushNotification(item: RSSItem): AppThunk {
     return (dispatch, getState) => {
-        const sourceName = getState().sources[item.source].name
+        const source = getState().sources[item.source]
+        if (!source) return
+        const sourceName = source.name
         if (!window.utils.isFocused()) {
             const options = { body: sourceName } as any
             if (item.thumb) options.icon = item.thumb
             const notification = new Notification(item.title, options)
             notification.onclick = () => {
                 const state = getState()
-                if (
-                    state.sources[item.source].openTarget ===
-                    SourceOpenTarget.External
-                ) {
+                // The source may have been deleted after the notification
+                const source = state.sources[item.source]
+                if (!source) return
+                if (source.openTarget === SourceOpenTarget.External) {
                     window.utils.openExternal(item.link)
                 } else if (!state.app.settings.display) {
                     window.utils.focus()
