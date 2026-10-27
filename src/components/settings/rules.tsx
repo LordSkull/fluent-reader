@@ -25,6 +25,7 @@ import { RuleTargetPicker } from "./rules/target-picker"
 import { RuleEditor } from "./rules/rule-editor"
 import { RuleList } from "./rules/rule-list"
 import { RulePreview } from "./rules/rule-preview"
+import { RetroApply } from "./rules/retro-apply"
 import { useStyles } from "./rules/styles"
 
 function RulesIntro() {
@@ -62,6 +63,9 @@ const RulesTab: React.FC = () => {
     const [selected, setSelected] = useState(new Set<number>())
     const [editIndex, setEditIndex] = useState(-1)
     const [saving, setSaving] = useState(false)
+    // Set while saved articles are being hidden by the rules.
+    const [applying, setApplying] = useState(false)
+    const locked = saving || applying
     const [error, setError] = useState("")
     const rules = target ? ruleState[getRuleTargetKey(target)] || [] : []
     const editing = target && (editIndex >= 0 || rules.length === 0)
@@ -90,7 +94,7 @@ const RulesTab: React.FC = () => {
     }, [target, sources, groups])
 
     async function persist(next: ArticleRule[]) {
-        if (saving) return
+        if (locked) return
         setSaving(true)
         dispatch(saveSettings())
         setError("")
@@ -107,7 +111,7 @@ const RulesTab: React.FC = () => {
     }
 
     function editRule(index: number) {
-        if (saving) return
+        if (locked) return
         setError("")
         setEditIndex(index)
     }
@@ -125,7 +129,7 @@ const RulesTab: React.FC = () => {
                 target={target}
                 sources={sources}
                 groups={groups}
-                saving={saving}
+                saving={locked}
                 onChange={changeTarget}
             />
             {error && (
@@ -139,7 +143,7 @@ const RulesTab: React.FC = () => {
                         <RuleEditor
                             key={`${getRuleTargetKey(target)}:${editIndex}`}
                             rule={rules[editIndex]}
-                            saving={saving}
+                            saving={locked}
                             onSave={saveRule}
                             onCancel={
                                 editIndex >= 0
@@ -154,7 +158,7 @@ const RulesTab: React.FC = () => {
                         <RuleList
                             key={`list:${getRuleTargetKey(target)}`}
                             rules={rules}
-                            saving={saving}
+                            saving={locked}
                             selected={selected}
                             onSelectionChange={setSelected}
                             onNew={() => editRule(rules.length)}
@@ -169,7 +173,16 @@ const RulesTab: React.FC = () => {
                         key={`preview:${getRuleTargetKey(target)}`}
                         target={target}
                         rules={effectiveRules}
-                        saving={saving}
+                        saving={locked}
+                    />
+                    <RetroApply
+                        key={`retro:${getRuleTargetKey(target)}`}
+                        target={target}
+                        sources={sources}
+                        groups={groups}
+                        rules={ruleState}
+                        locked={saving}
+                        onBusyChange={setApplying}
                     />
                 </>
             ) : (
