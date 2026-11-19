@@ -179,3 +179,15 @@ All three must succeed. If the build fails, fix TypeScript errors. If prettier f
 Run the E2E test suite if available at the end of sessions to check for regressions, and update the test suite to cover any new features built.
 
 Trust these instructions. Only search the codebase if information here is incomplete or found to be incorrect.
+
+## Build artifacts policy
+
+All Fluent Reader packaging artifacts must be generated inside this repository, using the existing electron-builder output directory:
+
+`./bin/${platform}/${arch}/`
+
+For Windows x64 installer and ZIP builds, use `npm run package-win-ci`.
+
+Never create build-output folders in the parent directory (`D:\`) or beside the repository.
+
+The `bin/` directory is already excluded by `.gitignore`. Do not ignore or repurpose the existing `build/` and `dist/` directories, which contain tracked project resources.
