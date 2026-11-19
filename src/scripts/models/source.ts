@@ -7,13 +7,20 @@ import {
     fetchFavicon,
     ActionStatus,
     AppThunk,
-    parseRSS,
+    fetchFeed,
+    FetchedFeed,
     MyParserItem,
 } from "../utils"
+import { normalizeFeed, NormalizedArticle } from "../rss-normalizers"
+import {
+    AggregateCandidate,
+    hasAggregates,
+    isLegacyAggregate,
+} from "./aggregate"
 import {
     RSSItem,
     LINK_WHITESPACE,
-    insertItems,
+    storeItems,
     ItemActionTypes,
     FETCH_ITEMS,
     MARK_READ,
@@ -42,6 +49,17 @@ export const enum SourceTextDirection {
     Vertical,
 }
 
+// New articles found in a feed. Aggregated articles are checked again when
+// stored, as they may also update an existing article.
+export type CheckedFeed = {
+    items: RSSItem[]
+    aggregates: AggregateCandidate[]
+}
+
+// Items per statement when looking for stored copies, well below SQLite's
+// limit on bound parameters.
+const FRAGMENT_CHUNK = 50
+
 export class RSSSource {
     sid: number
     url: string
@@ -66,20 +84,17 @@ export class RSSSource {
     }
 
     static async fetchMetaData(source: RSSSource) {
-        let feed = await parseRSS(source.url)
+        const fetched = await fetchFeed(source.url)
+        const feed = fetched.feed
         if (!source.name) {
             if (feed.title) source.name = feed.title.trim()
             source.name = source.name || intl.get("sources.untitled")
         }
-        return feed
+        return fetched
     }
 
-    private static async checkItem(
-        i: RSSItem,
-        item: MyParserItem,
-        rules: ArticleRule[],
-        hasPublicationDate: boolean
-    ): Promise<RSSItem> {
+    // Matches a stored copy of an article, as imported by any version.
+    private static identityMatch(i: RSSItem, hasPublicationDate: boolean) {
         const legacyMatch = and(
             eq(itemsTable.title, i.title),
             // i.link is trimmed, but links stored by older versions may not be.
@@ -88,16 +103,29 @@ export class RSSSource {
         )
         // Migrated articles have no GUID. Use the fallback match when either side
         // lacks an identifier, but distinguish different known GUIDs.
-        const identityMatch = i.guid
+        return i.guid
             ? or(
                   eq(itemsTable.guid, i.guid),
                   and(isNull(itemsTable.guid), legacyMatch)
               )
             : legacyMatch
+    }
+
+    private static async checkItem(
+        i: RSSItem,
+        item: MyParserItem,
+        rules: ArticleRule[],
+        hasPublicationDate: boolean
+    ): Promise<RSSItem> {
         const existing = await database
             .select({ _id: itemsTable._id })
             .from(itemsTable)
-            .where(and(eq(itemsTable.source, i.source), identityMatch))
+            .where(
+                and(
+                    eq(itemsTable.source, i.source),
+                    this.identityMatch(i, hasPublicationDate)
+                )
+            )
             .limit(1)
         if (existing.length === 0) {
             RSSItem.parseContent(i, item)
@@ -146,9 +174,91 @@ export class RSSSource {
         return (await Promise.all(pending)).filter(item => item != null)
     }
 
-    static async fetchItems(source: RSSSource, rules: ArticleRule[]) {
-        let feed = await parseRSS(source.url)
-        return await this.checkItems(source, feed.items, rules)
+    private static aggregateItem(
+        source: RSSSource,
+        article: NormalizedArticle
+    ): RSSItem {
+        const item = new RSSItem(
+            {
+                title: article.title,
+                link: article.link,
+                guid: article.guid,
+                isoDate: article.date.toISOString(),
+            } as MyParserItem,
+            source
+        )
+        item.guid = article.guid
+        item.content = article.content
+        item.snippet = article.snippet
+        return item
+    }
+
+    // Conditions matching any stored copy of the items of a feed, with the
+    // same identity as checkItems, in statements of bounded size.
+    private static fragmentMatches(source: RSSSource, items: MyParserItem[]) {
+        const conditions = items.map(item =>
+            this.identityMatch(
+                new RSSItem(item, source),
+                findValidDate(item.isoDate, item.pubDate) !== undefined
+            )
+        )
+        const chunks: ReturnType<typeof or>[] = []
+        for (let i = 0; i < conditions.length; i += FRAGMENT_CHUNK)
+            chunks.push(or(...conditions.slice(i, i + FRAGMENT_CHUNK)))
+        return chunks
+    }
+
+    // Feeds known to a normalizer become one article, unless older versions
+    // already imported the same items separately. Other feeds are unchanged.
+    // Once a source has such articles, a response that cannot be verified is
+    // an error: nothing is stored, the last valid version stays, and the next
+    // fetch tries again.
+    static async checkFeed(
+        source: RSSSource,
+        fetched: FetchedFeed,
+        rules: ArticleRule[]
+    ): Promise<CheckedFeed> {
+        const result = source.serviceRef
+            ? ({ kind: "none" } as const)
+            : normalizeFeed(source.url, fetched.responseUrl, fetched.feed)
+        switch (result.kind) {
+            case "empty":
+                return { items: [], aggregates: [] }
+            case "invalid":
+                if (await hasAggregates(source.sid, result.guidPrefix))
+                    throw new Error(
+                        intl.get("log.aggregateInvalid", {
+                            reason: result.reason,
+                        }) || `Feed not verified (${result.reason}).`
+                    )
+                break
+            case "article": {
+                const article = result.article
+                const fragments = this.fragmentMatches(
+                    source,
+                    fetched.feed.items
+                )
+                if (
+                    await isLegacyAggregate(source.sid, article.guid, fragments)
+                )
+                    break
+                const item = this.aggregateItem(source, article)
+                ArticleRule.applyAll(rules, item)
+                return { items: [], aggregates: [{ item, fragments }] }
+            }
+        }
+        return {
+            items: await this.checkItems(source, fetched.feed.items, rules),
+            aggregates: [],
+        }
+    }
+
+    static async fetchItems(
+        source: RSSSource,
+        rules: ArticleRule[]
+    ): Promise<CheckedFeed> {
+        const fetched = await fetchFeed(source.url)
+        return await this.checkFeed(source, fetched, rules)
     }
 }
 
@@ -371,19 +481,24 @@ export function addSource(
             dispatch(addSourceRequest(batch))
             const source = new RSSSource(url, name)
             try {
-                const feed = await RSSSource.fetchMetaData(source)
+                const fetched = await RSSSource.fetchMetaData(source)
                 const inserted = await dispatch(insertSource(source))
                 const state = getState()
-                const items = await RSSSource.checkItems(
+                const checked = await RSSSource.checkFeed(
                     inserted,
-                    feed.items,
+                    fetched,
                     getRulesForTarget(state.rules, state.groups, {
                         type: "source",
                         sid: inserted.sid,
                     })
                 )
-                await insertItems(items)
-                inserted.unreadCount = items.filter(
+                const stored = await storeItems(
+                    checked.items,
+                    checked.aggregates
+                )
+                // Reported like an error inserting the other articles.
+                if (stored.failed.length > 0) throw stored.failed[0].err
+                inserted.unreadCount = stored.inserted.filter(
                     item => !item.hasRead
                 ).length
                 dispatch(addSourceSuccess(inserted, batch))

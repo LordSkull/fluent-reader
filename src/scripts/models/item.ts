@@ -10,8 +10,15 @@ import {
     ActionStatus,
     AppThunk,
     platformCtrl,
+    mergeSortedArrays,
 } from "../utils"
-import { RSSSource, updateSource, updateUnreadCounts } from "./source"
+import {
+    RSSSource,
+    CheckedFeed,
+    updateSource,
+    updateUnreadCounts,
+} from "./source"
+import { AggregateCandidate, storeAggregates } from "./aggregate"
 import { FeedActionTypes, INIT_FEED, LOAD_MORE, dismissItems } from "./feed"
 import {
     pushNotification,
@@ -133,6 +140,7 @@ export const MARK_UNREAD = "MARK_UNREAD"
 export const TOGGLE_STARRED = "TOGGLE_STARRED"
 export const TOGGLE_HIDDEN = "TOGGLE_HIDDEN"
 export const HYDRATE_ITEM = "HYDRATE_ITEM"
+export const UPDATE_ITEM_CONTENT = "UPDATE_ITEM_CONTENT"
 
 interface FetchItemsAction {
     type: typeof FETCH_ITEMS
@@ -176,6 +184,16 @@ interface HydrateItemAction {
     item: RSSItem
 }
 
+interface UpdateItemContentAction {
+    type: typeof UPDATE_ITEM_CONTENT
+    // Rows as updated in the database.
+    items: RSSItem[]
+    // Articles in memory before the update.
+    itemState: ItemState
+    // The open article, which stays in its feed.
+    keepId: number
+}
+
 export type ItemActionTypes =
     | FetchItemsAction
     | MarkReadAction
@@ -184,6 +202,7 @@ export type ItemActionTypes =
     | ToggleStarredAction
     | ToggleHiddenAction
     | HydrateItemAction
+    | UpdateItemContentAction
 
 // Stores an article just read from the database, replacing any copy in
 // memory. Feeds are not changed.
@@ -191,6 +210,36 @@ export const hydrateItem = (item: RSSItem): ItemActionTypes => ({
     type: HYDRATE_ITEM,
     item: item,
 })
+
+// An article updated in place, as it is in memory: the copy in memory with
+// the new editorial fields, keeping its read, starred and hidden states, or
+// the updated row if the article is not in memory.
+export function applyItemContent(current: RSSItem, row: RSSItem): RSSItem {
+    if (!current) return { ...row, link: trimLink(row.link) }
+    return {
+        ...current,
+        title: row.title,
+        link: trimLink(row.link),
+        date: row.date,
+        content: row.content,
+        snippet: row.snippet,
+    }
+}
+
+// Applies articles updated in place to memory and to loaded feeds, which gain
+// or lose them as their filters now match, in date order. Unread counts are
+// not changed.
+export function updateItemContent(items: RSSItem[]): AppThunk {
+    return (dispatch, getState) => {
+        const state = getState()
+        dispatch({
+            type: UPDATE_ITEM_CONTENT,
+            items: items,
+            itemState: state.items,
+            keepId: state.page.itemId,
+        })
+    }
+}
 
 export function fetchItemsRequest(fetchCount = 0): ItemActionTypes {
     return {
@@ -259,12 +308,43 @@ export async function insertItems(items: RSSItem[]): Promise<RSSItem[]> {
         .returning()) as unknown as RSSItem[]
 }
 
+export type StoredItems = {
+    // New articles, oldest first.
+    inserted: RSSItem[]
+    // Aggregated articles whose content was updated in place.
+    updated: RSSItem[]
+    // Aggregated articles that could not be stored.
+    failed: { sid: number; err: unknown }[]
+}
+
+// Stores the result of checking feeds. Only an error inserting the ordinary
+// articles is thrown.
+export async function storeItems(
+    items: RSSItem[],
+    aggregates: AggregateCandidate[]
+): Promise<StoredItems> {
+    const inserted = await insertItems(items)
+    if (aggregates.length === 0) return { inserted, updated: [], failed: [] }
+    const stored = await storeAggregates(aggregates)
+    const byDate = (a: RSSItem, b: RSSItem) =>
+        a.date.getTime() - b.date.getTime()
+    return {
+        inserted: mergeSortedArrays(
+            inserted,
+            stored.inserted.sort(byDate),
+            byDate
+        ),
+        updated: stored.updated,
+        failed: stored.failed,
+    }
+}
+
 export function fetchItems(
     background = false,
     sids: number[] = null
 ): AppThunk<Promise<void>> {
     return async (dispatch, getState) => {
-        let promises = new Array<Promise<RSSItem[]>>()
+        let promises = new Array<Promise<CheckedFeed>>()
         const initState = getState()
         if (!initState.app.fetchingItems && !initState.app.syncing) {
             if (
@@ -299,27 +379,42 @@ export function fetchItems(
                         sid: source.sid,
                     })
                 )
-                promise.then(() =>
-                    dispatch(
-                        updateSource({ ...source, lastFetched: new Date() })
-                    )
+                // A failed fetch is reported below, with the other results.
+                const failed = () => {}
+                promise.then(
+                    () =>
+                        dispatch(
+                            updateSource({ ...source, lastFetched: new Date() })
+                        ),
+                    failed
                 )
-                promise.finally(() => dispatch(fetchItemsIntermediate()))
+                const intermediate = () => dispatch(fetchItemsIntermediate())
+                promise.then(intermediate, intermediate)
                 promises.push(promise)
             }
             dispatch(fetchItemsRequest(promises.length))
             const results = await Promise.allSettled(promises)
             return await new Promise<void>((resolve, reject) => {
                 let items = new Array<RSSItem>()
+                let aggregates = new Array<AggregateCandidate>()
                 results.map((r, i) => {
-                    if (r.status === "fulfilled") items.push(...r.value)
-                    else {
+                    if (r.status === "fulfilled") {
+                        items.push(...r.value.items)
+                        aggregates.push(...r.value.aggregates)
+                    } else {
                         console.log(r.reason)
                         dispatch(fetchItemsFailure(sources[i], r.reason))
                     }
                 })
-                insertItems(items)
-                    .then(inserted => {
+                storeItems(items, aggregates)
+                    .then(({ inserted, updated, failed }) => {
+                        for (const { sid, err } of failed) {
+                            console.error(err)
+                            const source = getState().sources[sid]
+                            if (source) dispatch(fetchItemsFailure(source, err))
+                        }
+                        if (updated.length > 0)
+                            dispatch(updateItemContent(updated))
                         dispatch(
                             fetchItemsSuccess(
                                 inserted.reverse(),
@@ -553,6 +648,16 @@ export function itemReducer(
                 ...state,
                 [action.item._id]: action.item,
             }
+        case UPDATE_ITEM_CONTENT: {
+            let nextState: ItemState = null
+            for (let item of action.items) {
+                const current = state[item._id]
+                if (current && current.source !== item.source) continue
+                nextState = nextState || { ...state }
+                nextState[item._id] = applyItemContent(current, item)
+            }
+            return nextState || state
+        }
         case MARK_UNREAD:
         case MARK_READ:
         case TOGGLE_STARRED:

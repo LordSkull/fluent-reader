@@ -29,6 +29,7 @@
         "day": "{d, plural, =1 {# day} other {# days}}"
     },
     "log": {
+        "aggregateInvalid": "The Camera dei deputati agenda was not updated: the feed could not be verified ({reason}). The last valid version is kept and the next refresh will try again.",
         "empty": "No notifications",
         "fetchFailure": "Failed to load source \"{name}\".",
         "fetchSuccess": "Successfully fetched {count, plural, =1 {# article} other {# articles}}.",

@@ -13,7 +13,10 @@ import {
     FETCH_ITEMS,
     RSSItem,
     TOGGLE_HIDDEN,
+    UPDATE_ITEM_CONTENT,
+    ItemState,
     applyItemReduction,
+    applyItemContent,
     trimLink,
 } from "./item"
 import { ActionStatus, AppThunk, mergeSortedArrays } from "../utils"
@@ -322,6 +325,54 @@ export function loadMore(feed: RSSFeed): AppThunk<Promise<void>> {
     }
 }
 
+// Keeps a loaded feed consistent with articles updated in place. An article
+// that no longer matches the filter leaves the feed, unless it is open; one
+// that now matches joins it, and one whose date changed moves, in date order.
+// Beyond the loaded part of a feed that is not fully loaded, an article is
+// left to be loaded later, so that loading more neither skips nor repeats it.
+function updateFeedContent(
+    feed: RSSFeed,
+    rows: RSSItem[],
+    itemState: ItemState,
+    keepId: number
+): RSSFeed {
+    let iids = feed.iids
+    for (const row of rows) {
+        if (!feed.sids.includes(row.source)) continue
+        const current = itemState[row._id]
+        if (current && current.source !== row.source) continue
+        const item = applyItemContent(current, row)
+        const listed = iids.includes(item._id)
+        const matches = FeedFilter.testItem(feed.filter, item)
+        if (listed && !matches && item._id === keepId) continue
+        if (
+            listed &&
+            matches &&
+            current &&
+            current.date.getTime() === item.date.getTime()
+        )
+            continue
+        const rest = listed ? iids.filter(id => id !== item._id) : iids
+        if (!matches) {
+            iids = rest
+            continue
+        }
+        let at = rest.findIndex(id => {
+            const other = itemState[id]
+            return other && other.date.getTime() < item.date.getTime()
+        })
+        if (at < 0) {
+            if (!feed.allLoaded) {
+                iids = rest
+                continue
+            }
+            at = rest.length
+        }
+        iids = [...rest.slice(0, at), item._id, ...rest.slice(at)]
+    }
+    return iids === feed.iids ? feed : { ...feed, iids }
+}
+
 export function feedReducer(
     state: FeedState = { [ALL]: new RSSFeed(ALL) },
     action:
@@ -382,6 +433,23 @@ export function feedReducer(
                 }
             }
             return nextState
+        }
+        case UPDATE_ITEM_CONTENT: {
+            let nextState: FeedState = null
+            for (const feed of Object.values(state)) {
+                if (!feed.loaded) continue
+                const next = updateFeedContent(
+                    feed,
+                    action.items,
+                    action.itemState,
+                    action.keepId
+                )
+                if (next !== feed) {
+                    nextState = nextState || { ...state }
+                    nextState[feed._id] = next
+                }
+            }
+            return nextState || state
         }
         case FETCH_ITEMS:
             switch (action.status) {

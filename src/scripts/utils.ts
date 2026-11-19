@@ -80,7 +80,14 @@ export async function decodeFetchResponse(response: Response, isHTML = false) {
     return content
 }
 
-export async function parseRSS(url: string) {
+export type ParsedFeed = Awaited<ReturnType<typeof rssParser.parseString>>
+export type FetchedFeed = {
+    feed: ParsedFeed
+    // The URL the feed was served from, after redirects.
+    responseUrl: string
+}
+
+export async function fetchFeed(url: string): Promise<FetchedFeed> {
     let result: Response
     try {
         result = await fetch(url, { credentials: "omit" })
@@ -89,15 +96,22 @@ export async function parseRSS(url: string) {
     }
     if (result && result.ok) {
         try {
-            return await rssParser.parseString(
-                await decodeFetchResponse(result)
-            )
+            return {
+                feed: await rssParser.parseString(
+                    await decodeFetchResponse(result)
+                ),
+                responseUrl: result.url || "",
+            }
         } catch {
             throw new Error(intl.get("log.parseError"))
         }
     } else {
         throw new Error(result.status + " " + result.statusText)
     }
+}
+
+export async function parseRSS(url: string) {
+    return (await fetchFeed(url)).feed
 }
 
 export const domParser = new DOMParser()

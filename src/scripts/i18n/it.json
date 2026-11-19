@@ -28,6 +28,7 @@
         "day": "{d, plural, =1 {# giorno} other {# giorni}}"
     },
     "log": {
+        "aggregateInvalid": "L'ordine del giorno della Camera dei deputati non è stato aggiornato: il feed non è verificabile ({reason}). Resta l'ultima versione valida; il prossimo aggiornamento riproverà.",
         "empty": "Non ci sono notifiche",
         "fetchFailure": "Errore nel caricare la fonte \"{name}\".",
         "fetchSuccess": "{count, plural, =1 {# articolo} other {# articoli}} caricato con successo",
