@@ -2,7 +2,7 @@
 
 ## Overview
 
-Fluent Reader is a **modern desktop RSS reader** built with **Electron + React + Redux + TypeScript**. It targets Windows, macOS (including Mac App Store), and Linux. The UI uses Microsoft's **Fluent UI (v7)** component library. Article and source data is stored in a **SQLite** database (via **better-sqlite3** in the main process, accessed from the renderer via **drizzle-orm** sqlite-proxy). Settings are persisted with **electron-store**. Articles are parsed with **Mercury Parser** and fetched via **rss-parser**.
+Fluent Reader is a **modern desktop RSS reader** built with **Electron + React 19 + Redux + TypeScript**. It targets Windows, macOS (including Mac App Store), and Linux. The UI uses Microsoft's **Fluent UI** component libraries: **v9** (`@fluentui/react-components`) for migrated views and **v8** (`@fluentui/react`) for the rest. Article and source data is stored in a **SQLite** database (via **better-sqlite3** in the main process, accessed from the renderer via **drizzle-orm** sqlite-proxy). Settings are persisted with **electron-store**. Articles are parsed with **Mercury Parser** and fetched via **rss-parser**.
 
 The repository is ~80 TypeScript/TSX source files under `src/`. There is no ESLint — formatting is handled solely by **Prettier**.
 
@@ -12,11 +12,27 @@ Always run commands from the repository root.
 
 ### Install dependencies
 
+Requires **Node.js 24** and **npm 11.19.1** exactly (`engines`, `devEngines` and `packageManager` in `package.json`). Check both before installing, and select npm if needed:
+
 ```bash
-npm install
+node --version   # v24.x
+npm --version    # 11.19.1
+npm install --global npm@11.19.1
 ```
 
-Run this **before every build**. The lockfile (`package-lock.json`) is gitignored (`.lock` in `.gitignore`), so `npm install` resolves from `package.json` each time.
+Then install:
+
+```bash
+npm install      # or `npm ci` for a clean install from the lockfile, as CI does
+```
+
+Run this **before every build**. `package-lock.json` is tracked in Git: `npm ci` installs exactly what it records, and dependency changes must update it with `npm install`.
+
+npm 11.19.1 is required because it applies `"allowScripts": { "better-sqlite3": false }` (see below). npm 10 ignores that policy: when installing from the lockfile it runs `node-gyp rebuild` for `better-sqlite3`, which fails without a C++ toolchain. `.npmrc` sets `engine-strict=true`, so npm rejects any other npm or Node.js version (`EBADENGINE`, or `EBADDEVENGINES` on npm 10.9+ and newer npm 11) before installing packages or running any dependency script. A `preinstall` script cannot do this: npm runs dependency install scripts before the root one.
+
+### Native module (better-sqlite3)
+
+`better-sqlite3` is pinned to an exact version and is used only through the Node-API prebuilds it ships in `prebuilds/`; nothing compiles it, so no C++ toolchain is needed. Because the package also contains a `binding.gyp`, npm and `@electron/rebuild` would still run `node-gyp`: `allowScripts` in `package.json` denies its install script, `postinstall` runs `node build/native-prebuilds.js` instead of `electron-builder install-app-deps`, and both Electron Builder configs set `npmRebuild: false`. That is safe only because of `build/native-prebuilds.js`: run directly it validates the host (exact versions, binary format and architecture, Node-API version, no other native production dependency) and loads the module with the installed Electron, querying `:memory:`; as the `beforePack` hook it fails the build unless the target's prebuild passes these checks; as the `afterPack` hook it verifies the binary unpacked from the ASAR in the packaged app and, on the host, loads it with the packaged executable. `node build/native-prebuilds.js --target <platform>-<arch>` and `--packaged <appOutDir>` run the same checks by hand. Do not use a `beforeBuild` hook that resolves to `false`: Electron Builder then stops collecting `node_modules` and the package ships without `better-sqlite3`. Upgrading `better-sqlite3` or Electron, or adding a native dependency, means re-running these checks.
 
 ### Build (compile TypeScript via Webpack)
 
@@ -98,10 +114,10 @@ See `tests/README.md` for test setup details.
 
 Two GitHub Actions workflows in `.github/workflows/`:
 
-- **`release-main.yml`** — Triggered on version tags (`v*`). Runs on `windows-latest`. Steps: `npm install` → `npm run build` → `npm run package-win-ci`. Uploads `.exe` and `.zip` to a draft GitHub release.
-- **`release-linux.yml`** — Triggered when a release is published. Runs on `ubuntu-latest`. Steps: `npm install` → `npm run build` → `npm run package-linux`. Uploads `.AppImage`.
+- **`release-main.yml`** — Triggered on version tags (`v*`). Runs on `windows-latest`. Steps: Node.js 24 via `actions/setup-node` → `npm install --global npm@11.19.1` → print and verify `node --version` and `npm --version` against `package.json` → `npm ci` → `npm run build` → `npm run package-win-ci`. Uploads `.exe` and `.zip` to a draft GitHub release.
+- **`release-linux.yml`** — Triggered when a release is published. Runs on `ubuntu-latest`. Steps: the same Node.js 24, npm 11.19.1 and version check → `npm ci` → `npm run build` → `npm run package-linux`. Uploads `.AppImage`.
 
-Both CI pipelines run `npm install` then `npm run build`. There are no lint or test steps in CI.
+Both CI pipelines verify the toolchain before installing anything, then run `npm ci` and `npm run build`. There are no lint or test steps in CI.
 
 ## Project Layout
 
@@ -128,7 +144,7 @@ Both CI pipelines run `npm install` then `npm run build`. There are no lint or t
 | `schema-types.ts` | Shared TypeScript enums and types (ViewType, ThemeSettings, StoredRule, etc.) |
 | `db/schema.ts` | **Drizzle schema** — defines `sourcesTable` and `itemsTable` for better-sqlite3. |
 | `bridges/` | IPC bridges between renderer and main process (`settings.ts`, `utils.ts`, `db.ts`). |
-| `main/` | Electron main-process modules: `window.ts` (BrowserWindow), `settings.ts` (electron-store + IPC handlers), `db.ts` (SQLite init, migrations, IPC handler for db:execute, export/import), `utils.ts` (IPC utilities), `touchbar.ts`, `update-scripts.ts`. |
+| `main/` | Electron main-process modules: `window.ts` (BrowserWindow), `settings.ts` (electron-store + IPC handlers), `db.ts` (SQLite init, migrations, IPC handlers for db:execute and db:batch, export/import), `utils.ts` (IPC utilities), `touchbar.ts`, `update-scripts.ts`. |
 | `scripts/` | Renderer-side logic (runs in browser context). |
 | `scripts/reducer.ts` | Root Redux store — combines: sources, items, feeds, groups, page, service, app. |
 | `scripts/settings.ts` | Theme management, locale setup, Fluent UI theming. |
@@ -150,7 +166,7 @@ Contains app icons (`build/icons/`), macOS entitlements plists, provisioning pro
 ## Architecture Notes
 
 - **IPC pattern**: The renderer never imports Electron directly. All Electron APIs are accessed through `src/bridges/` which are exposed via `contextBridge` in `preload.ts`. Settings state flows: renderer → bridge (ipcRenderer) → main/settings.ts (ipcMain handlers) → electron-store.
-- **Database**: SQLite via **better-sqlite3** in the main process. The renderer accesses it through a single `db:execute` IPC handler using **drizzle-orm**'s sqlite-proxy pattern. The drizzle instance in the renderer (`database` from `scripts/db.ts`) sends all queries through `window.db.execute(sql, params, method)`. Schema is defined in `src/db/schema.ts`; migrations live in `dist/drizzle/` and are applied at startup via `migrate()` in `main/db.ts`. The SQLite file is colocated with electron-store's `config.json` (i.e., `path.dirname(store.path)`).
+- **Database**: SQLite via **better-sqlite3** in the main process. The renderer accesses it through the `db:execute` IPC handler using **drizzle-orm**'s sqlite-proxy pattern. The drizzle instance in the renderer (`database` from `scripts/db.ts`) sends queries through `window.db.execute(sql, params, method)`; `database.batch()` goes through `db:batch`, which runs all its statements in one main-process transaction (used e.g. by `insertItems` in chunks of 50 rows). Rows are returned raw, in SQL column order. Use `itemsInSources()` from `scripts/db.ts` to filter items by a list of sources. Schema is defined in `src/db/schema.ts`; migrations live in `dist/drizzle/` and are applied at startup via `migrate()` in `main/db.ts`. The SQLite file is colocated with electron-store's `config.json` (i.e., `path.dirname(store.path)`).
 - **Rules storage**: Rules are stored in electron-store under the `sourceRules` key as a `StoredRules` map. Each value is an ordered `StoredRule[]`. `setRulesForTarget()` replaces one target's rules in the main process; an empty array removes that entry. `getAllRules()` loads the map. Source entries are attached to `RSSSource.rules` during `initSources()`.
 - **Feed normalizers**: `src/scripts/rss-normalizers/` can turn all the items of one known feed into a single article with a stable GUID (currently only the Camera dei deputati agenda, `camera-odg.ts`). `RSSSource.checkFeed()` returns such articles as `aggregates`; `storeItems()` in `models/item.ts` inserts them or, through the serialized queue in `models/aggregate.ts`, updates their editorial fields (title, link, date, content, snippet) in place. Updates keep `_id` and every user state, do not reapply rules, add no unread count or notification, and reach Redux via `UPDATE_ITEM_CONTENT`. Sittings that older versions imported as separate items stay separate (matched by GUID, or by title, link and date for GUID-less migrated rows); nothing is migrated. Once a source has an aggregated article, a Camera response that fails validation is a fetch error and stores nothing. Loaded feeds follow updated articles (`updateFeedContent` in `models/feed.ts`). Every other feed is imported exactly as before.
 - **State management**: Redux with `redux-thunk` for async actions. The store shape is defined by `RootState` in `scripts/reducer.ts`. Each model file in `scripts/models/` exports its own reducer, action types, and thunk action creators.

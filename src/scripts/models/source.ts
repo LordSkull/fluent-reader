@@ -103,12 +103,14 @@ export class RSSSource {
         )
         // Migrated articles have no GUID. Use the fallback match when either side
         // lacks an identifier, but distinguish different known GUIDs.
-        return i.guid
+        const identityMatch = i.guid
             ? or(
                   eq(itemsTable.guid, i.guid),
                   and(isNull(itemsTable.guid), legacyMatch)
               )
             : legacyMatch
+        // Articles synced from a service are not local copies.
+        return and(isNull(itemsTable.serviceRef), identityMatch)
     }
 
     private static async checkItem(

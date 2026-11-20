@@ -53,6 +53,9 @@ Refer to the repo of [react-intl-universal](https://github.com/alibaba/react-int
 If you enjoy using this app, consider supporting its development by donating through [GitHub Sponsors](https://github.com/sponsors/yang991178), [Paypal](https://www.paypal.me/yang991178), or [Alipay](https://hyliu.me/fluent-reader/imgs/alipay.jpg).
 
 ### Build from source
+
+Requires Node.js 24 and npm 11.19.1 (`npm install --global npm@11.19.1`); other versions are rejected at install time.
+
 ```bash
 # Install dependencies
 npm install

@@ -11,12 +11,14 @@ import {
     RuleTarget,
     StoredRule,
     getRuleTargetKey,
+    ARTICLE_OVERLAY_MIN_WIDTH,
+    LIST_VIEW_MIN_WIDTH,
 } from "../schema-types"
 import { ipcMain, session, nativeTheme, app } from "electron"
 import { WindowManager } from "./window"
 import { transformLovefieldRules } from "./utils"
 
-export const store = new Store<SchemaTypes>()
+export const store = new Store<SchemaTypes>({ cache: true })
 
 const GROUPS_STORE_KEY = "sourceGroups"
 function nextGroupId(): number {
@@ -47,7 +49,7 @@ ipcMain.handle("set-groups", (_, groups: SourceGroup[]) => {
 ipcMain.on("get-groups", event => {
     const nextId = nextGroupId()
     if (store.get("nextGroupId", 0) < nextId) store.set("nextGroupId", nextId)
-    const groups = store.get(GROUPS_STORE_KEY, [])
+    const groups = store.get(GROUPS_STORE_KEY, []).map(group => ({ ...group }))
     const ids = new Set<number>()
     let changed = false
     for (const group of groups) {
@@ -178,6 +180,23 @@ ipcMain.handle("set-font", (_, font: string) => {
     store.set(FONT_STORE_KEY, font)
 })
 
+for (const [key, channel, minimum] of [
+    ["articleOverlayWidth", "article-overlay-width", ARTICLE_OVERLAY_MIN_WIDTH],
+    ["listViewWidth", "list-view-width", LIST_VIEW_MIN_WIDTH],
+] as const) {
+    ipcMain.on(`get-${channel}`, event => {
+        const width = store.get(key, minimum)
+        event.returnValue = Number.isFinite(width)
+            ? Math.max(minimum, Math.round(width))
+            : minimum
+    })
+    ipcMain.handle(`set-${channel}`, (_, width: number) => {
+        if (Number.isFinite(width) && width >= minimum) {
+            store.set(key, Math.round(width))
+        }
+    })
+}
+
 const FETCH_INTEVAL_STORE_KEY = "fetchInterval"
 ipcMain.on("get-fetch-interval", event => {
     event.returnValue = store.get(FETCH_INTEVAL_STORE_KEY, 0)
@@ -248,7 +267,7 @@ ipcMain.handle(
         const key = getRuleTargetKey(target)
         // Keep the read and write together in main so independent targets cannot
         // overwrite each other using stale renderer snapshots.
-        const allRules = store.get(SOURCE_RULES_STORE_KEY, {})
+        const allRules = { ...store.get(SOURCE_RULES_STORE_KEY, {}) }
         if (rules.length > 0) allRules[key] = rules
         else delete allRules[key]
         store.set(SOURCE_RULES_STORE_KEY, allRules)

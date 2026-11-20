@@ -2,20 +2,22 @@ import * as React from "react"
 import intl from "react-intl-universal"
 import { FeedProps } from "./feed"
 import {
-    PrimaryButton,
     FocusZone,
     FocusZoneDirection,
     List,
-} from "office-ui-fabric-react"
+    AnimationClassNames,
+} from "@fluentui/react"
 import { RSSItem } from "../../scripts/models/item"
-import { AnimationClassNames } from "@fluentui/react"
 import { ViewType } from "../../schema-types"
 import ListCard from "../cards/list-card"
 import MagazineCard from "../cards/magazine-card"
 import CompactCard from "../cards/compact-card"
 import { Card } from "../cards/card"
+import { useFeedTabStop } from "../utils/hooks/useFeedTabStop"
+import { FeedEnd } from "./feed-end"
 
 const ListFeed: React.FC<FeedProps> = props => {
+    const { elementRef, onPagesUpdated } = useFeedTabStop()
     const onRenderItem = (item: RSSItem) => {
         const cardProps = {
             feedId: props.feed._id,
@@ -57,45 +59,24 @@ const ListFeed: React.FC<FeedProps> = props => {
         }
     }
 
-    const canFocusChild = (el: HTMLElement) => {
-        if (el.id === "load-more") {
-            const container = document.getElementById("refocus")
-            const result =
-                container.scrollTop >
-                container.scrollHeight - 2 * container.offsetHeight
-            if (!result) container.scrollTop += 100
-            return result
-        } else {
-            return true
-        }
-    }
-
     return (
         props.feed.loaded && (
             <FocusZone
+                elementRef={elementRef}
                 as="div"
                 id="refocus"
                 direction={FocusZoneDirection.vertical}
                 className={getClassName()}
-                shouldReceiveFocus={canFocusChild}
                 data-is-scrollable>
                 <List
                     className={AnimationClassNames.slideUpIn10}
                     items={props.items}
                     onRenderCell={onRenderItem}
+                    onPagesUpdated={onPagesUpdated}
                     ignoreScrollingState
                     usePageCache
                 />
-                {props.feed.loaded && !props.feed.allLoaded ? (
-                    <div className="load-more-wrapper">
-                        <PrimaryButton
-                            id="load-more"
-                            text={intl.get("loadMore")}
-                            disabled={props.feed.loading}
-                            onClick={() => props.loadMore(props.feed)}
-                        />
-                    </div>
-                ) : null}
+                <FeedEnd feed={props.feed} loadMore={props.loadMore} />
                 {props.items.length === 0 && (
                     <div className="empty">{intl.get("article.empty")}</div>
                 )}

@@ -1,5 +1,5 @@
 appId: me.hyliu.fluent-reader-mas
-buildVersion: 34
+buildVersion: 35
 productName: Fluent Reader
 copyright: Copyright © 2020 Haoyuan Liu
 files:
@@ -12,6 +12,12 @@ asarUnpack:
     - "./dist/fontlist"
     - "node_modules/better-sqlite3/**/*"
 forceCodeSigning: true
+# better-sqlite3 ships Node-API prebuilds; @electron/rebuild would still try
+# to compile it with node-gyp. The rebuild is skipped only because these hooks
+# verify the target's prebuild before packing and the packaged binary after.
+npmRebuild: false
+beforePack: ./build/native-prebuilds.js
+afterPack: ./build/native-prebuilds.js
 directories:
     output: "./bin/${platform}/${arch}/"
 mac:
@@ -42,6 +48,7 @@ mac:
         - pt_PT
         - cs
         - pl
+        - sk
     minimumSystemVersion: 13.0.0
 mas:
     identity: "Haoyuan Liu (P2CG8QD3BP)"

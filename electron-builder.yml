@@ -5,6 +5,12 @@ files:
     - "./dist/**/*"
     - "!./dist/fontlist"
     - "!**/*.js.map"
+# better-sqlite3 ships Node-API prebuilds; @electron/rebuild would still try
+# to compile it with node-gyp. The rebuild is skipped only because these hooks
+# verify the target's prebuild before packing and the packaged binary after.
+npmRebuild: false
+beforePack: ./build/native-prebuilds.js
+afterPack: ./build/native-prebuilds.js
 directories:
     output: "./bin/${platform}/${arch}/"
 mac:
@@ -45,6 +51,7 @@ mac:
         - pt_PT
         - cs
         - pl
+        - sk
 win:
     target:
         - nsis
@@ -73,6 +80,7 @@ appx:
         - pt-PT
         - cs
         - pl
+        - sk
     showNameOnTiles: true
     setBuildNumber: true
 nsis:

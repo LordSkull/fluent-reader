@@ -1,5 +1,5 @@
-import { database, itemsTable } from "../db"
-import { and, eq, inArray, desc, sql } from "drizzle-orm"
+import { database, itemsTable, itemsInSources } from "../db"
+import { and, eq, desc, sql } from "drizzle-orm"
 import {
     SourceActionTypes,
     INIT_SOURCES,
@@ -100,7 +100,7 @@ export class RSSFeed {
         if (feed.sids.length === 0) return []
         const filter = feed.filter
         const type = filter.type
-        const conditions = [inArray(itemsTable.source, feed.sids)]
+        const conditions = [itemsInSources(feed.sids)]
         if (!(type & FilterType.ShowRead))
             conditions.push(eq(itemsTable.hasRead, false))
         if (!(type & FilterType.ShowNotStarred))
@@ -145,7 +145,7 @@ export class RSSFeed {
             .select()
             .from(itemsTable)
             .where(and(...conditions))
-            .orderBy(desc(itemsTable.date))
+            .orderBy(desc(itemsTable.date), desc(itemsTable._id))
             .offset(skip)
             .limit(LOAD_QUANTITY)) as unknown as RSSItem[]
         // Items saved before links were trimmed on import are not rewritten
@@ -357,9 +357,15 @@ function updateFeedContent(
             iids = rest
             continue
         }
+        // In the order of loadFeed: newest first, then by descending _id.
         let at = rest.findIndex(id => {
             const other = itemState[id]
-            return other && other.date.getTime() < item.date.getTime()
+            return (
+                other &&
+                (other.date.getTime() < item.date.getTime() ||
+                    (other.date.getTime() === item.date.getTime() &&
+                        other._id < item._id))
+            )
         })
         if (at < 0) {
             if (!feed.allLoaded) {
@@ -470,7 +476,8 @@ export function feedReducer(
                                     oldItems,
                                     items,
                                     (a, b) =>
-                                        b.date.getTime() - a.date.getTime()
+                                        b.date.getTime() - a.date.getTime() ||
+                                        b._id - a._id
                                 )
                                 nextState[feed._id] = {
                                     ...feed,

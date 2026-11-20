@@ -1,6 +1,6 @@
 import { getRulesForTarget } from "./rule"
-import { eq, and, inArray, lte, gte } from "drizzle-orm"
-import { database, itemsTable } from "../db"
+import { eq, and, lte, gte } from "drizzle-orm"
+import { database, itemsTable, itemsInSources } from "../db"
 import { getValidDate } from "../date"
 import intl from "react-intl-universal"
 import type { MyParserItem } from "../utils"
@@ -61,6 +61,21 @@ export class RSSItem {
     hidden: boolean
     notify: boolean
     serviceRef?: string
+
+    static normalize(item: RSSItem) {
+        item.title =
+            typeof item.title === "string" && item.title
+                ? item.title
+                : intl.get("article.untitled")
+        for (const field of ["link", "content", "snippet"] as const) {
+            if (typeof item[field] !== "string") item[field] = ""
+        }
+        for (const field of ["thumb", "creator", "guid"] as const) {
+            if (typeof item[field] !== "string") delete item[field]
+        }
+        item.fetchedDate = getValidDate(item.fetchedDate, item.date)
+        item.date = getValidDate(item.date, item.fetchedDate)
+    }
 
     constructor(item: MyParserItem, source: RSSSource) {
         for (let field of ["title", "link", "creator", "author"]) {
@@ -281,8 +296,7 @@ export async function insertItems(items: RSSItem[]): Promise<RSSItem[]> {
     if (items.length === 0) return []
     // Service integrations construct articles without going through RSSItem.
     for (const item of items) {
-        item.fetchedDate = getValidDate(item.fetchedDate, item.date)
-        item.date = getValidDate(item.date, item.fetchedDate)
+        RSSItem.normalize(item)
     }
     items.sort((a, b) => a.date.getTime() - b.date.getTime())
     const values = items.map(item => ({
@@ -302,10 +316,19 @@ export async function insertItems(items: RSSItem[]): Promise<RSSItem[]> {
         notify: item.notify,
         serviceRef: item.serviceRef || null,
     }))
-    return (await database
-        .insert(itemsTable)
-        .values(values)
-        .returning()) as unknown as RSSItem[]
+    // Bound SQL parameters and query construction even for large refreshes.
+    const queries = []
+    for (let i = 0; i < values.length; i += 50) {
+        queries.push(
+            database
+                .insert(itemsTable)
+                .values(values.slice(i, i + 50))
+                .returning()
+        )
+    }
+    const [first, ...rest] = queries
+    const results = await database.batch([first, ...rest])
+    return results.flat() as unknown as RSSItem[]
 }
 
 export type StoredItems = {
@@ -380,17 +403,9 @@ export function fetchItems(
                     })
                 )
                 // A failed fetch is reported below, with the other results.
-                const failed = () => {}
-                promise.then(
-                    () =>
-                        dispatch(
-                            updateSource({ ...source, lastFetched: new Date() })
-                        ),
-                    failed
+                promises.push(
+                    promise.finally(() => dispatch(fetchItemsIntermediate()))
                 )
-                const intermediate = () => dispatch(fetchItemsIntermediate())
-                promise.then(intermediate, intermediate)
-                promises.push(promise)
             }
             dispatch(fetchItemsRequest(promises.length))
             const results = await Promise.allSettled(promises)
@@ -407,14 +422,43 @@ export function fetchItems(
                     }
                 })
                 storeItems(items, aggregates)
-                    .then(({ inserted, updated, failed }) => {
+                    .then(async ({ inserted, updated, failed }) => {
+                        const failedSids = new Set<number>()
                         for (const { sid, err } of failed) {
                             console.error(err)
+                            failedSids.add(sid)
                             const source = getState().sources[sid]
                             if (source) dispatch(fetchItemsFailure(source, err))
                         }
                         if (updated.length > 0)
                             dispatch(updateItemContent(updated))
+                        // A source is fetched once its articles are stored.
+                        const updates: Promise<void>[] = []
+                        for (let i = 0; i < results.length; i++) {
+                            if (
+                                results[i].status === "fulfilled" &&
+                                !failedSids.has(sources[i].sid)
+                            ) {
+                                const source =
+                                    getState().sources[sources[i].sid]
+                                if (source) {
+                                    updates.push(
+                                        dispatch(
+                                            updateSource({
+                                                ...source,
+                                                lastFetched: new Date(),
+                                            })
+                                        )
+                                    )
+                                }
+                            }
+                        }
+                        for (const update of await Promise.allSettled(
+                            updates
+                        )) {
+                            if (update.status === "rejected")
+                                console.log(update.reason)
+                        }
                         dispatch(
                             fetchItemsSuccess(
                                 inserted.reverse(),
@@ -438,9 +482,11 @@ export function fetchItems(
                     })
                     .catch(err => {
                         dispatch(fetchItemsSuccess([], getState().items))
+                        const cause =
+                            err instanceof Error && err.cause ? err.cause : err
                         window.utils.showErrorBox(
                             "A database error has occurred.",
-                            String(err)
+                            String(cause).slice(0, 2000)
                         )
                         console.log(err)
                         reject(err)
@@ -494,10 +540,7 @@ export function markAllRead(
             before
         )
         if (action) await dispatch(action)
-        const conditions = [
-            inArray(itemsTable.source, sids),
-            eq(itemsTable.hasRead, false),
-        ]
+        const conditions = [itemsInSources(sids), eq(itemsTable.hasRead, false)]
         if (date) {
             conditions.push(
                 before ? lte(itemsTable.date, date) : gte(itemsTable.date, date)

@@ -1,7 +1,7 @@
 import * as React from "react"
 import { useMemo, useCallback, useEffect, useRef, useState } from "react"
 import intl from "react-intl-universal"
-import { SourceGroup, ViewType } from "../schema-types"
+import { SourceGroup } from "../schema-types"
 import { RSSSource } from "../scripts/models/source"
 import { ALL, initFeeds } from "../scripts/models/feed"
 import { useAppSelector, useAppDispatch } from "../scripts/reducer"
@@ -34,6 +34,7 @@ import { FlatButton } from "./utils/FlatButton"
 import { FlatButtonGroup } from "./utils/FlatButtonGroup"
 import { useIsWideScreen } from "./utils/hooks/useIsWideScreen"
 import { useIsBlurred } from "./utils/hooks/useIsBlurred"
+import { useArticleOverlayOpen } from "./utils/hooks/useArticleOverlayOpen"
 import { Icon } from "@fluentui/react"
 import { StackShim } from "@fluentui/react-migration-v8-v9"
 
@@ -48,6 +49,9 @@ const useMenuClasses = makeStyles({
     menuGroupDarwin: {
         display: "flex",
         flexDirection: "row-reverse",
+    },
+    menuHeader: {
+        height: "var(--navHeight)",
     },
     menuContainer: {
         "position": "fixed",
@@ -65,6 +69,9 @@ const useMenuClasses = makeStyles({
     },
     menuContainerShow: {
         pointerEvents: "unset",
+    },
+    menuArticleBlurred: {
+        filter: "var(--blur)",
     },
     menuInner: {
         "position": "absolute",
@@ -105,11 +112,6 @@ const useMenuClasses = makeStyles({
     menuInnerDarwin: {
         "@media (min-width: 1440px)": {
             background: "none",
-        },
-    },
-    menuInnerItemOnDarwin: {
-        "@media (min-width: 1440px)": {
-            backgroundColor: "var(--neutralLight)",
         },
     },
     navWrapper: {
@@ -159,9 +161,7 @@ export const Menu: React.FC = () => {
     const sources = useAppSelector(s => s.sources)
     const groups = useAppSelector(s => s.groups)
     const searchOn = useAppSelector(s => s.page.searchOn)
-    const itemOn = useAppSelector(
-        s => s.page.itemId !== null && s.page.viewType !== ViewType.List
-    )
+    const articleOverlayOpen = useArticleOverlayOpen()
 
     const openItems = useMemo(
         () =>
@@ -267,44 +267,50 @@ export const Menu: React.FC = () => {
             <div
                 className={mergeClasses(
                     menuClasses.menuContainer,
-                    display && menuClasses.menuContainerShow
+                    display && menuClasses.menuContainerShow,
+                    articleOverlayOpen && menuClasses.menuArticleBlurred
                 )}
                 onClick={handleToggleMenu}>
                 <div
                     className={mergeClasses(
                         menuClasses.menuInner,
                         display && menuClasses.menuInnerShow,
-                        isDarwin && menuClasses.menuInnerDarwin,
-                        isDarwin && itemOn && menuClasses.menuInnerItemOnDarwin
+                        isDarwin && menuClasses.menuInnerDarwin
                     )}
                     onClick={e => e.stopPropagation()}>
-                    <FlatButtonGroup
-                        styleClass={
-                            isDarwin ? menuClasses.menuGroupDarwin : undefined
-                        }>
-                        <FlatButton
-                            styleClass={mergeClasses(
-                                menuClasses.menuBtn,
-                                isBlurred
-                                    ? menuClasses.menuBtnBlurred
-                                    : undefined
-                            )}
-                            title={intl.get("menu.close")}
-                            ariaLabel={intl.get("menu.close")}
-                            onClick={handleToggleMenu}>
-                            {isWideScreen ? (
-                                <Icon
-                                    iconName={
-                                        isDarwin
-                                            ? "SidePanel"
-                                            : "GlobalNavButton"
-                                    }
-                                />
-                            ) : (
-                                <Icon iconName="Back" />
-                            )}
-                        </FlatButton>
-                    </FlatButtonGroup>
+                    <div className={menuClasses.menuHeader}>
+                        {display && (
+                            <FlatButtonGroup
+                                styleClass={
+                                    isDarwin
+                                        ? menuClasses.menuGroupDarwin
+                                        : undefined
+                                }>
+                                <FlatButton
+                                    styleClass={mergeClasses(
+                                        menuClasses.menuBtn,
+                                        isBlurred
+                                            ? menuClasses.menuBtnBlurred
+                                            : undefined
+                                    )}
+                                    title={intl.get("menu.close")}
+                                    ariaLabel={intl.get("menu.close")}
+                                    onClick={handleToggleMenu}>
+                                    {isWideScreen ? (
+                                        <Icon
+                                            iconName={
+                                                isDarwin
+                                                    ? "SidePanel"
+                                                    : "GlobalNavButton"
+                                            }
+                                        />
+                                    ) : (
+                                        <Icon iconName="Back" />
+                                    )}
+                                </FlatButton>
+                            </FlatButtonGroup>
+                        )}
+                    </div>
                     <div className={menuClasses.navWrapper}>
                         <Tree
                             ref={treeRef}
@@ -468,6 +474,12 @@ const useTreeItemClasses = makeStyles({
         color: tokens.colorNeutralForeground1,
         fontWeight: tokens.fontWeightSemibold,
     },
+    label: {
+        minWidth: 0,
+        overflow: "hidden",
+        whiteSpace: "nowrap",
+        textOverflow: "ellipsis",
+    },
     unreadCount: {
         color: tokens.colorNeutralForeground3,
         marginLeft: "auto",
@@ -532,6 +544,7 @@ const MenuTreeItem: React.FC<MenuTreeItemProps> = ({
                     isSelected && c.selectedItem
                 )}
                 iconBefore={icon}
+                main={{ className: c.label }}
                 aside={resolvedAside}>
                 <span className={isSelected ? c.selectedItemText : undefined}>
                     {label}

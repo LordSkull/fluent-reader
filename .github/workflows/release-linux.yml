@@ -35,8 +35,28 @@ jobs:
                   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
               run: gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" > /dev/null
 
+            - name: Select npm
+              run: npm install --global npm@11.19.1
+
+            # npm 11.19.1 enforces "allowScripts", which skips node-gyp for
+            # better-sqlite3. Stop before installing anything if the toolchain
+            # does not match package.json.
+            - name: Verify Node.js and npm
+              shell: bash
+              run: |
+                  node --version
+                  npm --version
+                  NPM_VERSION="$(npm --version)" node -e '
+                      const { engines } = require("./package.json")
+                      const node = engines.node.match(/^\^(\d+)\./)[1]
+                      if (process.versions.node.split(".")[0] !== node)
+                          throw new Error(`Node.js ${process.version} does not match ${engines.node}`)
+                      if (process.env.NPM_VERSION !== engines.npm)
+                          throw new Error(`npm ${process.env.NPM_VERSION} does not match ${engines.npm}`)
+                  '
+
             - name: Install dependencies
-              run: npm install
+              run: npm ci
 
             - name: Verify article integrity
               run: npm run check:article-integrity

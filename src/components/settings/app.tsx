@@ -1,4 +1,5 @@
 import * as React from "react"
+import { useEffect, useRef, useState } from "react"
 import intl from "react-intl-universal"
 import {
     urlTest,
@@ -13,17 +14,19 @@ import {
     exportAll,
 } from "../../scripts/settings"
 import {
-    Stack,
-    Label,
-    Toggle,
-    TextField,
-    DefaultButton,
+    Button,
     Dropdown,
-    IDropdownOption,
-    PrimaryButton,
-} from "@fluentui/react"
-import { RadioGroup, Radio } from "@fluentui/react-components"
-import DangerButton from "../utils/danger-button"
+    Field,
+    Input,
+    Option,
+    RadioGroup,
+    Radio,
+    Switch,
+    Text,
+    tokens,
+} from "@fluentui/react-components"
+import { makeStyles, mergeClasses } from "@griffel/react"
+import { DangerButton } from "../utils/DangerButton"
 import { SourceState } from "../../scripts/models/source"
 import {
     CLEANUP_PERIODS,
@@ -58,151 +61,151 @@ type CleanupSelection = {
     cleanupGid: number
 }
 
-type AppTabState = CleanupSelection & {
-    pacStatus: boolean
-    pacUrl: string
-    themeSettings: ThemeSettings
-    itemSize: string
-    cacheSize: string
-    cleanupPreview: CleanupPreview
-    cleanupMessage: string
-    deleting: boolean
+type CleanupOption = { value: string; id: number; text: string }
+
+// Sorted by name; duplicate names are told apart by their URL.
+function cleanupSourceOptions(sources: SourceState): CleanupOption[] {
+    const sorted = Object.values(sources).sort(
+        (a, b) => a.name.localeCompare(b.name) || a.sid - b.sid
+    )
+    const names = new Map<string, number>()
+    for (let source of sorted)
+        names.set(source.name, (names.get(source.name) || 0) + 1)
+    return sorted.map(source => ({
+        value: String(source.sid),
+        id: source.sid,
+        text:
+            names.get(source.name) > 1
+                ? `${source.name} (${source.url})`
+                : source.name,
+    }))
 }
 
-class AppTab extends React.Component<AppTabProps, AppTabState> {
-    constructor(props) {
-        super(props)
-        this.state = {
-            pacStatus: window.settings.getProxyStatus(),
-            pacUrl: window.settings.getProxy(),
-            themeSettings: getThemeSettings(),
-            itemSize: null,
-            cacheSize: null,
-            deleteIndex: null,
-            cleanupScope: "all",
-            cleanupSid: null,
-            cleanupGid: null,
-            cleanupPreview: null,
-            cleanupMessage: null,
-            deleting: false,
-        }
-        this.getItemSize()
-        this.getCacheSize()
-    }
-
-    getCacheSize = () => {
-        window.utils.getCacheSize().then(size => {
-            this.setState({ cacheSize: byteToMB(size) })
-        })
-    }
-    getItemSize = () => {
-        calculateItemSize().then(size => {
-            this.setState({ itemSize: byteToMB(size) })
-        })
-    }
-
-    clearCache = () => {
-        window.utils.clearCache().then(() => {
-            this.getCacheSize()
-        })
-    }
-
-    fetchIntervalOptions = (): IDropdownOption[] => [
-        { key: 0, text: intl.get("app.never") },
-        { key: 10, text: intl.get("time.minute", { m: 10 }) },
-        { key: 15, text: intl.get("time.minute", { m: 15 }) },
-        { key: 20, text: intl.get("time.minute", { m: 20 }) },
-        { key: 30, text: intl.get("time.minute", { m: 30 }) },
-        { key: 45, text: intl.get("time.minute", { m: 45 }) },
-        { key: 60, text: intl.get("time.hour", { h: 1 }) },
-    ]
-    onFetchIntervalChanged = (item: IDropdownOption) => {
-        this.props.setFetchInterval(item.key as number)
-    }
-
-    searchEngineOptions = (): IDropdownOption[] =>
-        [
-            SearchEngines.Google,
-            SearchEngines.Bing,
-            SearchEngines.Baidu,
-            SearchEngines.DuckDuckGo,
-        ].map(engine => ({
-            key: engine,
-            text: getSearchEngineName(engine),
-        }))
-    onSearchEngineChanged = (item: IDropdownOption) => {
-        window.settings.setSearchEngine(item.key as number)
-    }
-
-    deleteOptions = (): IDropdownOption[] =>
-        CLEANUP_PERIODS.map(days => ({
-            key: String(days),
-            text:
-                days === 0
-                    ? intl.get("app.deleteAll")
-                    : intl.get("app.daysAgo", { days: days }),
-        }))
-
-    // Sorted by name; duplicate names are told apart by their URL.
-    cleanupSourceOptions = (): IDropdownOption[] => {
-        const sources = Object.values(this.props.sources).sort(
-            (a, b) => a.name.localeCompare(b.name) || a.sid - b.sid
+// User groups only, keyed by gid and sorted by name; duplicate names are
+// numbered in the order the groups were created.
+function cleanupGroupOptions(groups: SourceGroup[]): CleanupOption[] {
+    const sorted = groups
+        .filter(group => group.isMultiple === true)
+        .sort(
+            (a, b) =>
+                String(a.name).localeCompare(String(b.name)) || a.gid - b.gid
         )
-        const names = new Map<string, number>()
-        for (let source of sources)
-            names.set(source.name, (names.get(source.name) || 0) + 1)
-        return sources.map(source => ({
-            key: source.sid,
+    const names = new Map<string, number>()
+    for (let group of sorted)
+        names.set(group.name, (names.get(group.name) || 0) + 1)
+    const numbers = new Map<string, number>()
+    return sorted.map(group => {
+        const n = (numbers.get(group.name) || 0) + 1
+        numbers.set(group.name, n)
+        return {
+            value: String(group.gid),
+            id: group.gid,
             text:
-                names.get(source.name) > 1
-                    ? `${source.name} (${source.url})`
-                    : source.name,
-        }))
-    }
+                names.get(group.name) > 1 ? `${group.name} (${n})` : group.name,
+        }
+    })
+}
 
-    // User groups only, keyed by gid and sorted by name; duplicate names are
-    // numbered in the order the groups were created.
-    cleanupGroupOptions = (): IDropdownOption[] => {
-        const groups = this.props.groups
-            .filter(group => group.isMultiple === true)
-            .sort(
-                (a, b) =>
-                    String(a.name).localeCompare(String(b.name)) ||
-                    a.gid - b.gid
-            )
-        const names = new Map<string, number>()
-        for (let group of groups)
-            names.set(group.name, (names.get(group.name) || 0) + 1)
-        const numbers = new Map<string, number>()
-        return groups.map(group => {
-            const n = (numbers.get(group.name) || 0) + 1
-            numbers.set(group.name, n)
-            return {
-                key: group.gid,
-                text:
-                    names.get(group.name) > 1
-                        ? `${group.name} (${n})`
-                        : group.name,
-            }
+// Drizzle wraps database errors; the cause carries the actual reason.
+const cleanupError = (err: unknown) =>
+    String(err instanceof Error && err.cause ? err.cause : err)
+
+function cleanupResultMessage(result: CleanupResult) {
+    if (result.vacuumError)
+        return intl.get("app.cleanupVacuumFailed", {
+            count: result.deleted,
+            error: cleanupError(result.vacuumError),
         })
-    }
+    if (result.refreshError)
+        return intl.get("app.cleanupRefreshFailed", {
+            count: result.deleted,
+            error: cleanupError(result.refreshError),
+        })
+    return intl.get("app.cleanupDone", { count: result.deleted })
+}
 
+const useStyles = makeStyles({
+    root: { display: "flex", flexDirection: "column", gap: "16px" },
+    row: { display: "flex", gap: "8px", alignItems: "flex-start" },
+    section: { display: "flex", flexDirection: "column", gap: "4px" },
+    grow: { flex: 1, minWidth: 0 },
+    dropdown: { width: "200px", minWidth: 0 },
+    cleanup: { width: "100%", minWidth: 0 },
+    proxy: { gridTemplateColumns: "1fr auto", alignItems: "center" },
+    hint: { color: tokens.colorNeutralForeground3 },
+})
+
+function AppTab({
+    sources,
+    groups,
+    setLanguage,
+    setFetchInterval,
+    countArticles,
+    deleteArticles,
+    importAll,
+}: AppTabProps) {
+    const classes = useStyles()
+    const [locale, setLocale] = useState(() =>
+        window.settings.getLocaleSettings()
+    )
+    const [theme, setTheme] = useState(getThemeSettings)
+    const [fetchInterval, setSelectedFetchInterval] = useState(() =>
+        String(window.settings.getFetchInterval())
+    )
+    const [searchEngine, setSearchEngine] = useState(() =>
+        window.settings.getSearchEngine()
+    )
+    const [pacStatus, setPacStatus] = useState(() =>
+        window.settings.getProxyStatus()
+    )
+    const [pacUrl, setPacUrl] = useState(() => window.settings.getProxy())
+    const [itemSize, setItemSize] = useState<string>(null)
+    const [cacheSize, setCacheSize] = useState<string>(null)
+    const [selection, setSelection] = useState<CleanupSelection>({
+        deleteIndex: null,
+        cleanupScope: "all",
+        cleanupSid: null,
+        cleanupGid: null,
+    })
+    // Incremented to count the current selection again.
+    const [previewRequest, setPreviewRequest] = useState(0)
+    const [cleanupPreview, setCleanupPreview] = useState<CleanupPreview>(null)
+    const [cleanupMessage, setCleanupMessage] = useState<string>(null)
+    const [deleting, setDeleting] = useState(false)
     // Each selection gets a new sequence number. Counts of older selections
     // are discarded, and the DangerButton is keyed by it so that a pending
     // confirmation never carries over to another selection.
-    cleanupSeq = 0
-    deleting = false
-    unmounted = false
+    const cleanupSeq = useRef(0)
+    const deletingRef = useRef(false)
+    const mounted = useRef(true)
+    const prevSources = useRef(sources)
+    const prevGroups = useRef(groups)
 
-    componentWillUnmount() {
-        this.unmounted = true
-        // Discards the pending count.
-        this.cleanupSeq++
+    useEffect(() => {
+        mounted.current = true
+        calculateItemSize().then(size => {
+            if (mounted.current) setItemSize(byteToMB(size))
+        })
+        window.utils.getCacheSize().then(size => {
+            if (mounted.current) setCacheSize(byteToMB(size))
+        })
+        return () => {
+            mounted.current = false
+            // Discards the pending count.
+            cleanupSeq.current++
+        }
+    }, [])
+
+    const { deleteIndex, cleanupScope, cleanupSid, cleanupGid } = selection
+
+    function selectCleanup(changes: Partial<CleanupSelection>) {
+        setSelection(current => ({ ...current, ...changes }))
+        setCleanupMessage(null)
+        setPreviewRequest(n => n + 1)
     }
 
-    updateCleanupPreview = () => {
-        const seq = ++this.cleanupSeq
-        const { deleteIndex, cleanupScope, cleanupSid, cleanupGid } = this.state
+    useEffect(() => {
+        const seq = ++cleanupSeq.current
         const filter =
             deleteIndex === null
                 ? null
@@ -210,114 +213,124 @@ class AppTab extends React.Component<AppTabProps, AppTabState> {
                       parseInt(deleteIndex),
                       cleanupScope,
                       cleanupScope === "group" ? cleanupGid : cleanupSid,
-                      this.props.sources,
+                      sources,
                       Date.now(),
-                      this.props.groups
+                      groups
                   )
         if (filter === null) {
-            this.setState({ cleanupPreview: null })
+            setCleanupPreview(null)
             return
         }
-        this.setState({ cleanupPreview: { seq: seq, filter: filter } })
+        setCleanupPreview({ seq: seq, filter: filter })
         const setCount = (count: number, failed = false) => {
-            if (seq !== this.cleanupSeq) return
-            this.setState(state =>
-                state.cleanupPreview?.seq === seq
-                    ? {
-                          cleanupPreview: {
-                              ...state.cleanupPreview,
-                              count: count,
-                              failed: failed,
-                          },
-                      }
-                    : null
+            if (!mounted.current || seq !== cleanupSeq.current) return
+            setCleanupPreview(preview =>
+                preview?.seq === seq
+                    ? { ...preview, count: count, failed: failed }
+                    : preview
             )
         }
-        this.props.countArticles(filter).then(
+        countArticles(filter).then(
             count => setCount(count),
             err => {
                 console.error(err)
                 setCount(undefined, true)
             }
         )
-    }
+        // Counted again only when the selection changes or is refreshed.
+    }, [selection, previewRequest])
 
-    selectCleanup = (selection: Partial<CleanupSelection>) => {
-        this.setState(
-            {
-                deleteIndex: this.state.deleteIndex,
-                cleanupScope: this.state.cleanupScope,
-                cleanupSid: this.state.cleanupSid,
-                cleanupGid: this.state.cleanupGid,
-                ...selection,
-                cleanupMessage: null,
-            },
-            this.updateCleanupPreview
-        )
-    }
-
-    deleteChange = (_, item: IDropdownOption) => {
-        this.selectCleanup({ deleteIndex: item ? String(item.key) : null })
-    }
-
-    cleanupScopeChange = (
-        _: React.FormEvent<HTMLDivElement>,
-        data: { value: string }
-    ) => {
-        this.selectCleanup({ cleanupScope: data.value as CleanupScope })
-    }
-
-    cleanupSourceChange = (_, item: IDropdownOption) => {
-        this.selectCleanup({ cleanupSid: item ? (item.key as number) : null })
-    }
-
-    cleanupGroupChange = (_, item: IDropdownOption) => {
-        this.selectCleanup({ cleanupGid: item ? (item.key as number) : null })
-    }
-
-    componentDidUpdate(prevProps: AppTabProps) {
-        const sid = this.state.cleanupSid
-        if (
-            prevProps.sources !== this.props.sources &&
-            sid !== null &&
-            !(sid in this.props.sources)
-        ) {
-            this.selectCleanup({ cleanupSid: null })
+    useEffect(() => {
+        const sourcesChanged = prevSources.current !== sources
+        const lastGroups = prevGroups.current
+        prevSources.current = sources
+        prevGroups.current = groups
+        const changes: Partial<CleanupSelection> = {}
+        let refresh = false
+        if (sourcesChanged && cleanupSid !== null && !(cleanupSid in sources)) {
+            changes.cleanupSid = null
+            refresh = true
         }
-        const gid = this.state.cleanupGid
-        if (prevProps.groups !== this.props.groups && gid !== null) {
-            const find = (groups: SourceGroup[]) =>
-                groups.find(g => g.isMultiple === true && g.gid === gid)
+        if (lastGroups !== groups && cleanupGid !== null) {
+            const find = (list: SourceGroup[]) =>
+                list.find(g => g.isMultiple === true && g.gid === cleanupGid)
             // Compared as sets: reordering the sources changes nothing.
             const members = (group: SourceGroup) =>
                 group ? [...new Set(group.sids)].sort().join() : null
-            const group = find(this.props.groups)
+            const group = find(groups)
             if (!group) {
-                this.selectCleanup({ cleanupGid: null })
+                changes.cleanupGid = null
+                refresh = true
             } else if (
-                this.state.cleanupScope === "group" &&
-                members(group) !== members(find(prevProps.groups))
+                cleanupScope === "group" &&
+                members(group) !== members(find(lastGroups))
             ) {
                 // Replaces the preview and any pending confirmation.
-                this.selectCleanup({})
+                refresh = true
             }
         }
-    }
+        if (refresh) selectCleanup(changes)
+    }, [sources, groups])
+
+    const languageOptions = [
+        { value: "default", text: intl.get("followSystem") },
+        { value: "de", text: "Deutsch" },
+        { value: "en-US", text: "English" },
+        { value: "es", text: "Español" },
+        { value: "cs", text: "Čeština" },
+        { value: "fr-FR", text: "Français" },
+        { value: "it", text: "Italiano" },
+        { value: "nl", text: "Nederlands" },
+        { value: "pt-BR", text: "Português do Brasil" },
+        { value: "pt-PT", text: "Português de Portugal" },
+        { value: "sk-SK", text: "Slovenčina" },
+        { value: "fi-FI", text: "Suomi" },
+        { value: "sv", text: "Svenska" },
+        { value: "tr", text: "Türkçe" },
+        { value: "uk", text: "Українська" },
+        { value: "ru", text: "Русский" },
+        { value: "ko", text: "한글" },
+        { value: "ja", text: "日本語" },
+        { value: "zh-CN", text: "中文（简体）" },
+        { value: "zh-TW", text: "中文（繁體）" },
+    ]
+    const fetchIntervalOptions = [0, 10, 15, 20, 30, 45, 60].map(minutes => ({
+        value: String(minutes),
+        text:
+            minutes === 0
+                ? intl.get("app.never")
+                : minutes === 60
+                ? intl.get("time.hour", { h: 1 })
+                : intl.get("time.minute", { m: minutes }),
+    }))
+    const searchEngineOptions = [
+        SearchEngines.Google,
+        SearchEngines.Bing,
+        SearchEngines.Baidu,
+        SearchEngines.DuckDuckGo,
+    ]
+    const deleteOptions = CLEANUP_PERIODS.map(days => ({
+        value: String(days),
+        text: days
+            ? intl.get("app.daysAgo", { days })
+            : intl.get("app.deleteAll"),
+    }))
+    const sourceOptions = cleanupSourceOptions(sources)
+    const groupOptions = cleanupGroupOptions(groups)
+    const validPacUrl = urlTest(pacUrl)
+    const pacError = pacUrl && !validPacUrl ? intl.get("app.badUrl") : ""
 
     // The selection is locked while deleting and while counting it.
-    cleanupLocked = () => {
-        const preview = this.state.cleanupPreview
-        return (
-            this.state.deleting ||
-            (preview !== null && preview.count === undefined && !preview.failed)
-        )
-    }
+    const cleanupLocked =
+        deleting ||
+        (cleanupPreview !== null &&
+            cleanupPreview.count === undefined &&
+            !cleanupPreview.failed)
 
-    cleanupSummary = (): string => {
-        if (this.state.deleting) return intl.get("app.cleanupDeleting")
-        const preview = this.state.cleanupPreview
+    function cleanupSummary(): string {
+        if (deleting) return intl.get("app.cleanupDeleting")
+        const preview = cleanupPreview
         if (preview === null) {
-            const { cleanupScope, cleanupGid, deleteIndex } = this.state
             // A group without sources yields no filter: nothing to delete.
             return cleanupScope === "group" &&
                 cleanupGid !== null &&
@@ -336,7 +349,7 @@ class AppTab extends React.Component<AppTabProps, AppTabState> {
                 : intl.get("app.cleanupPreviewAll", params)
         }
         if (scope === "group") {
-            const option = this.cleanupGroupOptions().find(o => o.key === gid)
+            const option = groupOptions.find(o => o.id === gid)
             const params = {
                 count: preview.count,
                 days: days,
@@ -346,7 +359,7 @@ class AppTab extends React.Component<AppTabProps, AppTabState> {
                 ? intl.get("app.cleanupPreviewGroupEvery", params)
                 : intl.get("app.cleanupPreviewGroup", params)
         }
-        const option = this.cleanupSourceOptions().find(o => o.key === sid)
+        const option = sourceOptions.find(o => o.id === sid)
         const params = {
             count: preview.count,
             days: days,
@@ -357,319 +370,352 @@ class AppTab extends React.Component<AppTabProps, AppTabState> {
             : intl.get("app.cleanupPreviewSource", params)
     }
 
-    // Drizzle wraps database errors; the cause carries the actual reason.
-    cleanupError = (err: unknown) =>
-        String(err instanceof Error && err.cause ? err.cause : err)
-
-    cleanupResultMessage = (result: CleanupResult) => {
-        if (result.vacuumError)
-            return intl.get("app.cleanupVacuumFailed", {
-                count: result.deleted,
-                error: this.cleanupError(result.vacuumError),
-            })
-        if (result.refreshError)
-            return intl.get("app.cleanupRefreshFailed", {
-                count: result.deleted,
-                error: this.cleanupError(result.refreshError),
-            })
-        return intl.get("app.cleanupDone", { count: result.deleted })
+    function toggleProxy() {
+        window.settings.toggleProxyStatus()
+        setPacStatus(window.settings.getProxyStatus())
+        setPacUrl(window.settings.getProxy())
     }
 
-    confirmDelete = () => {
-        const preview = this.state.cleanupPreview
+    function setProxy(event: React.FormEvent) {
+        event.preventDefault()
+        if (validPacUrl) window.settings.setProxy(pacUrl)
+    }
+
+    function confirmDelete() {
+        const preview = cleanupPreview
         // Only the filter of the preview currently shown may be deleted.
         if (
-            this.deleting ||
+            deletingRef.current ||
             !preview ||
-            preview.seq !== this.cleanupSeq ||
+            preview.seq !== cleanupSeq.current ||
             !(preview.count > 0)
         )
             return
-        this.deleting = true
-        this.setState({ deleting: true, itemSize: null, cleanupMessage: null })
-        this.props
-            .deleteArticles(preview.filter)
+        deletingRef.current = true
+        setDeleting(true)
+        setItemSize(null)
+        setCleanupMessage(null)
+        deleteArticles(preview.filter)
             .then(
                 result => {
-                    if (this.unmounted) return
-                    this.setState({
-                        cleanupMessage: this.cleanupResultMessage(result),
-                    })
+                    if (!mounted.current) return
+                    setCleanupMessage(cleanupResultMessage(result))
                 },
                 err => {
                     console.error(err)
-                    if (this.unmounted) return
-                    this.setState({
-                        cleanupMessage: intl.get("app.cleanupFailed", {
-                            error: this.cleanupError(err),
-                        }),
-                    })
+                    if (!mounted.current) return
+                    setCleanupMessage(
+                        intl.get("app.cleanupFailed", {
+                            error: cleanupError(err),
+                        })
+                    )
                 }
             )
             .finally(() => {
-                this.deleting = false
-                if (this.unmounted) return
-                this.setState({ deleting: false }, this.updateCleanupPreview)
-                this.getItemSize()
+                deletingRef.current = false
+                if (!mounted.current) return
+                setDeleting(false)
+                setPreviewRequest(n => n + 1)
+                calculateItemSize().then(size => {
+                    if (mounted.current) setItemSize(byteToMB(size))
+                })
             })
     }
 
-    languageOptions = (): IDropdownOption[] => [
-        { key: "default", text: intl.get("followSystem") },
-        { key: "de", text: "Deutsch" },
-        { key: "en-US", text: "English" },
-        { key: "es", text: "Español" },
-        { key: "cs", text: "Čeština" },
-        { key: "fr-FR", text: "Français" },
-        { key: "it", text: "Italiano" },
-        { key: "nl", text: "Nederlands" },
-        { key: "pt-BR", text: "Português do Brasil" },
-        { key: "pt-PT", text: "Português de Portugal" },
-        { key: "fi-FI", text: "Suomi" },
-        { key: "sv", text: "Svenska" },
-        { key: "tr", text: "Türkçe" },
-        { key: "uk", text: "Українська" },
-        { key: "ru", text: "Русский" },
-        { key: "ko", text: "한글" },
-        { key: "ja", text: "日本語" },
-        { key: "zh-CN", text: "中文（简体）" },
-        { key: "zh-TW", text: "中文（繁體）" },
-    ]
-
-    toggleStatus = () => {
-        window.settings.toggleProxyStatus()
-        this.setState({
-            pacStatus: window.settings.getProxyStatus(),
-            pacUrl: window.settings.getProxy(),
-        })
+    async function clearCache() {
+        await window.utils.clearCache()
+        setCacheSize(byteToMB(await window.utils.getCacheSize()))
     }
 
-    handleInputChange = event => {
-        const name: string = event.target.name
-        // @ts-ignore
-        this.setState({ [name]: event.target.value.trim() })
-    }
+    const summary = cleanupSummary()
 
-    setUrl = (event: React.FormEvent) => {
-        event.preventDefault()
-        if (urlTest(this.state.pacUrl))
-            window.settings.setProxy(this.state.pacUrl)
-    }
+    return (
+        <div className={mergeClasses("tab-body", classes.root)}>
+            <Field label={intl.get("app.language")}>
+                <Dropdown
+                    inlinePopup
+                    className={classes.dropdown}
+                    selectedOptions={[locale]}
+                    value={
+                        languageOptions.find(option => option.value === locale)
+                            ?.text || ""
+                    }
+                    onOptionSelect={(_, data) => {
+                        if (!data.optionValue) return
+                        setLocale(data.optionValue)
+                        setLanguage(data.optionValue)
+                    }}>
+                    {languageOptions.map(option => (
+                        <Option key={option.value} value={option.value}>
+                            {option.text}
+                        </Option>
+                    ))}
+                </Dropdown>
+            </Field>
 
-    onThemeChange = (
-        _: React.ChangeEvent<HTMLInputElement>,
-        data: { value: string }
-    ) => {
-        setThemeSettings(data.value as ThemeSettings)
-        this.setState({ themeSettings: data.value as ThemeSettings })
-    }
-
-    render = () => (
-        <div className="tab-body">
-            <Label>{intl.get("app.language")}</Label>
-            <Stack horizontal>
-                <Stack.Item>
-                    <Dropdown
-                        defaultSelectedKey={window.settings.getLocaleSettings()}
-                        options={this.languageOptions()}
-                        onChanged={option =>
-                            this.props.setLanguage(String(option.key))
-                        }
-                        style={{ width: 200 }}
+            <Field label={intl.get("app.theme")}>
+                <RadioGroup
+                    value={theme}
+                    onChange={(_, data) => {
+                        const value = data.value as ThemeSettings
+                        setThemeSettings(value)
+                        setTheme(value)
+                    }}>
+                    <Radio
+                        value={ThemeSettings.Default}
+                        label={intl.get("followSystem")}
                     />
-                </Stack.Item>
-            </Stack>
-
-            <Label>{intl.get("app.theme")}</Label>
-            <RadioGroup
-                value={this.state.themeSettings}
-                onChange={this.onThemeChange}>
-                <Radio
-                    value={ThemeSettings.Default}
-                    label={intl.get("followSystem")}
-                />
-                <Radio
-                    value={ThemeSettings.Light}
-                    label={intl.get("app.lightTheme")}
-                />
-                <Radio
-                    value={ThemeSettings.Dark}
-                    label={intl.get("app.darkTheme")}
-                />
-            </RadioGroup>
-
-            <Label>{intl.get("app.fetchInterval")}</Label>
-            <Stack horizontal>
-                <Stack.Item>
-                    <Dropdown
-                        defaultSelectedKey={window.settings.getFetchInterval()}
-                        options={this.fetchIntervalOptions()}
-                        onChanged={this.onFetchIntervalChanged}
-                        style={{ width: 200 }}
+                    <Radio
+                        value={ThemeSettings.Light}
+                        label={intl.get("app.lightTheme")}
                     />
-                </Stack.Item>
-            </Stack>
-
-            <Label>{intl.get("searchEngine.name")}</Label>
-            <Stack horizontal>
-                <Stack.Item>
-                    <Dropdown
-                        defaultSelectedKey={window.settings.getSearchEngine()}
-                        options={this.searchEngineOptions()}
-                        onChanged={this.onSearchEngineChanged}
-                        style={{ width: 200 }}
+                    <Radio
+                        value={ThemeSettings.Dark}
+                        label={intl.get("app.darkTheme")}
                     />
-                </Stack.Item>
-            </Stack>
+                </RadioGroup>
+            </Field>
 
-            <Stack horizontal verticalAlign="baseline">
-                <Stack.Item grow>
-                    <Label>{intl.get("app.enableProxy")}</Label>
-                </Stack.Item>
-                <Stack.Item>
-                    <Toggle
-                        checked={this.state.pacStatus}
-                        onChange={this.toggleStatus}
-                    />
-                </Stack.Item>
-            </Stack>
-            {this.state.pacStatus && (
-                <form onSubmit={this.setUrl}>
-                    <Stack horizontal>
-                        <Stack.Item grow>
-                            <TextField
+            <Field label={intl.get("app.fetchInterval")}>
+                <Dropdown
+                    inlinePopup
+                    className={classes.dropdown}
+                    selectedOptions={[fetchInterval]}
+                    value={
+                        fetchIntervalOptions.find(
+                            option => option.value === fetchInterval
+                        )?.text || ""
+                    }
+                    onOptionSelect={(_, data) => {
+                        if (!data.optionValue) return
+                        setSelectedFetchInterval(data.optionValue)
+                        setFetchInterval(Number(data.optionValue))
+                    }}>
+                    {fetchIntervalOptions.map(option => (
+                        <Option key={option.value} value={option.value}>
+                            {option.text}
+                        </Option>
+                    ))}
+                </Dropdown>
+            </Field>
+
+            <Field label={intl.get("searchEngine.name")}>
+                <Dropdown
+                    inlinePopup
+                    className={classes.dropdown}
+                    selectedOptions={[String(searchEngine)]}
+                    value={getSearchEngineName(searchEngine)}
+                    onOptionSelect={(_, data) => {
+                        if (!data.optionValue) return
+                        const value = Number(data.optionValue)
+                        setSearchEngine(value)
+                        window.settings.setSearchEngine(value)
+                    }}>
+                    {searchEngineOptions.map(engine => (
+                        <Option key={engine} value={String(engine)}>
+                            {getSearchEngineName(engine)}
+                        </Option>
+                    ))}
+                </Dropdown>
+            </Field>
+
+            <Field
+                className={classes.proxy}
+                orientation="horizontal"
+                label={intl.get("app.enableProxy")}>
+                <Switch checked={pacStatus} onChange={toggleProxy} />
+            </Field>
+            {pacStatus && (
+                <form onSubmit={setProxy}>
+                    <Field
+                        validationState={pacError ? "error" : "none"}
+                        validationMessage={pacError}
+                        hint={intl.get("app.pacHint")}>
+                        <div className={classes.row}>
+                            <Input
                                 required
-                                onGetErrorMessage={v =>
-                                    urlTest(v.trim())
-                                        ? ""
-                                        : intl.get("app.badUrl")
-                                }
+                                className={classes.grow}
+                                aria-label={intl.get("app.pac")}
                                 placeholder={intl.get("app.pac")}
                                 name="pacUrl"
-                                onChange={this.handleInputChange}
-                                value={this.state.pacUrl}
+                                value={pacUrl}
+                                onChange={(_, data) =>
+                                    setPacUrl(data.value.trim())
+                                }
                             />
-                        </Stack.Item>
-                        <Stack.Item>
-                            <DefaultButton
-                                disabled={!urlTest(this.state.pacUrl)}
-                                type="sumbit"
-                                text={intl.get("app.setPac")}
-                            />
-                        </Stack.Item>
-                    </Stack>
-                    <span className="settings-hint up">
-                        {intl.get("app.pacHint")}
-                    </span>
+                            <Button disabled={!validPacUrl} type="submit">
+                                {intl.get("app.setPac")}
+                            </Button>
+                        </div>
+                    </Field>
                 </form>
             )}
 
-            <Label>{intl.get("app.cleanup")}</Label>
-            <RadioGroup
-                value={this.state.cleanupScope}
-                disabled={this.cleanupLocked()}
-                onChange={this.cleanupScopeChange}>
-                <Radio value="all" label={intl.get("app.cleanupAllSources")} />
-                <Radio
-                    value="source"
-                    label={intl.get("app.cleanupOneSource")}
-                />
-                <Radio value="group" label={intl.get("app.cleanupOneGroup")} />
-            </RadioGroup>
-            {this.state.cleanupScope === "source" && (
-                <Stack horizontal>
-                    <Stack.Item grow>
+            <div className={classes.section}>
+                <Field label={intl.get("app.cleanup")}>
+                    <RadioGroup
+                        value={cleanupScope}
+                        disabled={cleanupLocked}
+                        onChange={(_, data) =>
+                            selectCleanup({
+                                cleanupScope: data.value as CleanupScope,
+                            })
+                        }>
+                        <Radio
+                            value="all"
+                            label={intl.get("app.cleanupAllSources")}
+                        />
+                        <Radio
+                            value="source"
+                            label={intl.get("app.cleanupOneSource")}
+                        />
+                        <Radio
+                            value="group"
+                            label={intl.get("app.cleanupOneGroup")}
+                        />
+                    </RadioGroup>
+                </Field>
+                {cleanupScope === "source" && (
+                    <div className={classes.row}>
                         <Dropdown
+                            inlinePopup
+                            className={mergeClasses(
+                                classes.grow,
+                                classes.cleanup
+                            )}
+                            aria-label={intl.get("app.cleanupSelectSource")}
                             placeholder={intl.get("app.cleanupSelectSource")}
-                            options={this.cleanupSourceOptions()}
-                            selectedKey={this.state.cleanupSid}
-                            disabled={this.cleanupLocked()}
-                            onChange={this.cleanupSourceChange}
-                        />
-                    </Stack.Item>
-                </Stack>
-            )}
-            {this.state.cleanupScope === "group" && (
-                <Stack horizontal>
-                    <Stack.Item grow>
+                            selectedOptions={
+                                cleanupSid === null ? [] : [String(cleanupSid)]
+                            }
+                            value={
+                                sourceOptions.find(o => o.id === cleanupSid)
+                                    ?.text || ""
+                            }
+                            disabled={cleanupLocked}
+                            onOptionSelect={(_, data) =>
+                                selectCleanup({
+                                    cleanupSid: data.optionValue
+                                        ? Number(data.optionValue)
+                                        : null,
+                                })
+                            }>
+                            {sourceOptions.map(option => (
+                                <Option key={option.value} value={option.value}>
+                                    {option.text}
+                                </Option>
+                            ))}
+                        </Dropdown>
+                    </div>
+                )}
+                {cleanupScope === "group" && (
+                    <div className={classes.row}>
                         <Dropdown
+                            inlinePopup
+                            className={mergeClasses(
+                                classes.grow,
+                                classes.cleanup
+                            )}
+                            aria-label={intl.get("app.cleanupSelectGroup")}
                             placeholder={intl.get("app.cleanupSelectGroup")}
-                            options={this.cleanupGroupOptions()}
-                            selectedKey={this.state.cleanupGid}
-                            disabled={this.cleanupLocked()}
-                            onChange={this.cleanupGroupChange}
-                        />
-                    </Stack.Item>
-                </Stack>
-            )}
-            <Stack horizontal>
-                <Stack.Item grow>
+                            selectedOptions={
+                                cleanupGid === null ? [] : [String(cleanupGid)]
+                            }
+                            value={
+                                groupOptions.find(o => o.id === cleanupGid)
+                                    ?.text || ""
+                            }
+                            disabled={cleanupLocked}
+                            onOptionSelect={(_, data) =>
+                                selectCleanup({
+                                    cleanupGid: data.optionValue
+                                        ? Number(data.optionValue)
+                                        : null,
+                                })
+                            }>
+                            {groupOptions.map(option => (
+                                <Option key={option.value} value={option.value}>
+                                    {option.text}
+                                </Option>
+                            ))}
+                        </Dropdown>
+                    </div>
+                )}
+                <div className={classes.row}>
                     <Dropdown
+                        inlinePopup
+                        className={mergeClasses(classes.grow, classes.cleanup)}
+                        aria-label={intl.get("app.deleteChoices")}
                         placeholder={intl.get("app.deleteChoices")}
-                        options={this.deleteOptions()}
-                        selectedKey={this.state.deleteIndex}
-                        disabled={this.cleanupLocked()}
-                        onChange={this.deleteChange}
-                    />
-                </Stack.Item>
-                <Stack.Item>
+                        selectedOptions={
+                            deleteIndex === null ? [] : [deleteIndex]
+                        }
+                        value={
+                            deleteOptions.find(
+                                option => option.value === deleteIndex
+                            )?.text || ""
+                        }
+                        disabled={cleanupLocked}
+                        onOptionSelect={(_, data) =>
+                            selectCleanup({
+                                deleteIndex: data.optionValue ?? null,
+                            })
+                        }>
+                        {deleteOptions.map(option => (
+                            <Option key={option.value} value={option.value}>
+                                {option.text}
+                            </Option>
+                        ))}
+                    </Dropdown>
                     <DangerButton
-                        key={this.state.cleanupPreview?.seq ?? -1}
-                        disabled={
-                            this.state.deleting ||
-                            !(this.state.cleanupPreview?.count > 0)
-                        }
+                        key={cleanupPreview?.seq ?? -1}
+                        disabled={deleting || !(cleanupPreview?.count > 0)}
                         text={intl.get("app.confirmDelete")}
-                        onClick={this.confirmDelete}
+                        onClick={confirmDelete}
                     />
-                </Stack.Item>
-            </Stack>
-            {this.state.cleanupMessage && (
-                <div className="settings-hint up">
-                    {this.state.cleanupMessage}
                 </div>
-            )}
-            {this.cleanupSummary() && (
-                <div className="settings-hint up">{this.cleanupSummary()}</div>
-            )}
-            <span className="settings-hint up">
-                {this.state.itemSize
-                    ? intl.get("app.itemSize", { size: this.state.itemSize })
-                    : intl.get("app.calculatingSize")}
-            </span>
-            <Stack horizontal>
-                <Stack.Item>
-                    <DefaultButton
-                        text={intl.get("app.cache")}
-                        disabled={
-                            this.state.cacheSize === null ||
-                            this.state.cacheSize === "0MB"
-                        }
-                        onClick={this.clearCache}
-                    />
-                </Stack.Item>
-            </Stack>
-            <span className="settings-hint up">
-                {this.state.cacheSize
-                    ? intl.get("app.cacheSize", { size: this.state.cacheSize })
-                    : intl.get("app.calculatingSize")}
-            </span>
+                {cleanupMessage && (
+                    <Text size={200} className={classes.hint}>
+                        {cleanupMessage}
+                    </Text>
+                )}
+                {summary && (
+                    <Text size={200} className={classes.hint}>
+                        {summary}
+                    </Text>
+                )}
+                <Text size={200} className={classes.hint}>
+                    {itemSize
+                        ? intl.get("app.itemSize", { size: itemSize })
+                        : intl.get("app.calculatingSize")}
+                </Text>
+            </div>
+            <div className={classes.section}>
+                <div className={classes.row}>
+                    <Button
+                        disabled={cacheSize === null || cacheSize === "0MB"}
+                        onClick={clearCache}>
+                        {intl.get("app.cache")}
+                    </Button>
+                </div>
+                <Text size={200} className={classes.hint}>
+                    {cacheSize
+                        ? intl.get("app.cacheSize", { size: cacheSize })
+                        : intl.get("app.calculatingSize")}
+                </Text>
+            </div>
 
-            <Label>{intl.get("app.data")}</Label>
-            <Stack horizontal>
-                <Stack.Item>
-                    <PrimaryButton
-                        onClick={exportAll}
-                        text={intl.get("app.backup")}
-                    />
-                </Stack.Item>
-                <Stack.Item>
-                    <DefaultButton
-                        onClick={this.props.importAll}
-                        text={intl.get("app.restore")}
-                    />
-                </Stack.Item>
-            </Stack>
+            <div className={classes.section}>
+                <Text weight="semibold">{intl.get("app.data")}</Text>
+                <div className={classes.row}>
+                    <Button appearance="primary" onClick={exportAll}>
+                        {intl.get("app.backup")}
+                    </Button>
+                    <Button onClick={importAll}>
+                        {intl.get("app.restore")}
+                    </Button>
+                </div>
+            </div>
         </div>
     )
 }

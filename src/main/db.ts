@@ -1,7 +1,7 @@
 import Database from "better-sqlite3"
 import { drizzle } from "drizzle-orm/better-sqlite3"
 import { migrate } from "drizzle-orm/better-sqlite3/migrator"
-import { ipcMain, dialog, nativeTheme } from "electron"
+import { app, ipcMain, dialog, nativeTheme } from "electron"
 import * as fs from "node:fs"
 import * as path from "node:path"
 import type Store from "electron-store"
@@ -13,6 +13,11 @@ import { WindowManager } from "./window"
 import performUpdate from "./update-scripts"
 import { transformLovefieldRules } from "./utils"
 import { getValidDate } from "../scripts/date"
+import type {
+    DatabaseQuery,
+    DatabaseResult,
+    RestoreDialogTexts,
+} from "../bridges/db"
 
 let sqlite: Database.Database
 let db: ReturnType<typeof drizzle>
@@ -20,15 +25,12 @@ let storeRef: Store<SchemaTypes>
 let managerRef: WindowManager
 let restartFn: () => void
 
-function toDrizzleResult(
-    rows: Record<string, unknown> | Record<string, unknown>[]
-): unknown[] {
-    if (!rows) return []
-    const convertValue = (v: unknown) => (typeof v === "bigint" ? Number(v) : v)
-    if (Array.isArray(rows)) {
-        return rows.map(row => Object.values(row).map(convertValue))
-    } else {
-        return Object.values(rows).map(convertValue)
+function optimizeDB() {
+    try {
+        sqlite.pragma("optimize")
+    } catch (err) {
+        // Statistics maintenance must not turn a committed write into a failure.
+        console.warn("SQLite optimize error:", err)
     }
 }
 
@@ -52,7 +54,7 @@ async function handleExportAll() {
     }
 }
 
-async function handleImportAll(): Promise<boolean> {
+async function handleImportAll(texts: RestoreDialogTexts): Promise<boolean> {
     if (!managerRef.hasWindow()) return true
     const openResult = await dialog.showOpenDialog(managerRef.mainWindow, {
         filters: [
@@ -75,9 +77,10 @@ async function handleImportAll(): Promise<boolean> {
 
     const confirmed = await dialog.showMessageBox(managerRef.mainWindow, {
         type: "warning",
-        message: "Restore from backup",
-        detail: "This will overwrite all current data. Continue?",
-        buttons: ["Cancel", "Restore"],
+        title: texts.title,
+        message: texts.title,
+        detail: texts.message,
+        buttons: [texts.cancel, texts.confirm],
         defaultId: 0,
         cancelId: 0,
     })
@@ -164,6 +167,7 @@ async function handleImportAll(): Promise<boolean> {
                     .run()
             }
         })
+        optimizeDB()
     } catch (err) {
         dialog.showErrorBox("Import Error", String(err))
         return true
@@ -230,6 +234,40 @@ export function initDB(
     const migrationsFolder = path.join(__dirname, "drizzle")
 
     migrate(db, { migrationsFolder })
+    // Include all tables on opening this long-lived connection, then maintain
+    // statistics after bulk writes, daily, and on an orderly shutdown.
+    try {
+        sqlite.pragma("optimize=0x10002")
+    } catch (err) {
+        console.warn("SQLite optimize error:", err)
+    }
+    const optimizeTimer = setInterval(optimizeDB, 24 * 60 * 60 * 1000)
+    optimizeTimer.unref()
+    app.once("will-quit", () => {
+        clearInterval(optimizeTimer)
+        optimizeDB()
+    })
+
+    const executeQuery = ({
+        sql,
+        params,
+        method,
+    }: DatabaseQuery): DatabaseResult => {
+        const stmt = sqlite.prepare(sql)
+        if (method === "run") {
+            const result = stmt.run(params)
+            return [result.changes, Number(result.lastInsertRowid)]
+        }
+        const convert = (row: unknown[]) =>
+            row?.map(value =>
+                typeof value === "bigint" ? Number(value) : value
+            )
+        // Drizzle maps columns positionally. Object rows lose duplicate names
+        // and reorder numeric aliases; raw rows preserve the actual SQL order.
+        stmt.raw()
+        if (method === "get") return convert(stmt.get(params) as unknown[])
+        return (stmt.all(params) as unknown[][]).map(convert)
+    }
 
     ipcMain.handle(
         "db:execute",
@@ -240,11 +278,7 @@ export function initDB(
             method: "run" | "all" | "values" | "get"
         ) => {
             try {
-                const stmt = sqlite.prepare(sql)
-                const result = stmt[method](...params) as
-                    | Record<string, unknown>
-                    | Record<string, unknown>[]
-                return toDrizzleResult(result)
+                return executeQuery({ sql, params, method })
             } catch (err) {
                 console.error("db:execute error:", err)
                 throw err
@@ -252,6 +286,23 @@ export function initDB(
         }
     )
 
+    // Keep the entire batch atomic without interleaving other renderer queries.
+    const executeBatch = sqlite.transaction((queries: DatabaseQuery[]) =>
+        queries.map(executeQuery)
+    )
+    ipcMain.handle("db:batch", (_, queries: DatabaseQuery[]) => {
+        try {
+            const results = executeBatch(queries)
+            optimizeDB()
+            return results
+        } catch (err) {
+            console.error("db:batch error:", err)
+            throw err
+        }
+    })
+
     ipcMain.handle("db-export-all", handleExportAll)
-    ipcMain.handle("db-import-all", handleImportAll)
+    ipcMain.handle("db-import-all", (_, texts: RestoreDialogTexts) =>
+        handleImportAll(texts)
+    )
 }
