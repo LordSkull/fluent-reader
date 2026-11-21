@@ -8,6 +8,8 @@ type CardInfoProps = {
     item: RSSItem
     hideTime?: boolean
     showCreator?: boolean
+    // Shown after the source name, e.g. the copies of the article.
+    badge?: React.ReactNode
 }
 
 const CardInfo: React.FunctionComponent<CardInfoProps> = props => (
@@ -19,6 +21,7 @@ const CardInfo: React.FunctionComponent<CardInfoProps> = props => (
                 <span className="creator">{props.item.creator}</span>
             )}
         </span>
+        {props.badge}
         {props.item.starred ? (
             <span className="starred-indicator"></span>
         ) : null}

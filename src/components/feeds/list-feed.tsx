@@ -26,14 +26,20 @@ const ListFeed: React.FC<FeedProps> = props => {
             source: props.sourceMap[item.source],
             filter: props.filter,
             viewConfigs: props.viewConfigs,
+            duplicates: props.duplicates(item),
+            currentItem: props.currentItem,
             shortcuts: props.shortcuts,
             markRead: props.markRead,
             contextMenu: props.contextMenu,
             showItem: props.showItem,
         } as Card.Props
+        // The card of a group is selected when any of its copies is open.
         if (
             props.viewType === ViewType.List &&
-            props.currentItem === item._id
+            (props.currentItem === item._id ||
+                cardProps.duplicates?.copies.some(
+                    copy => copy.item._id === props.currentItem
+                ))
         ) {
             cardProps.selected = true
         }

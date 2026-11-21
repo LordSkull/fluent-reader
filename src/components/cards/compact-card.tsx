@@ -1,5 +1,6 @@
 import * as React from "react"
 import { Card } from "./card"
+import { duplicatesBadge } from "./duplicates"
 import CardInfo from "./info"
 import Time from "../utils/time"
 import Highlights from "./highlights"
@@ -18,7 +19,12 @@ const CompactCard: React.FunctionComponent<Card.Props> = props => (
         {...Card.bindEventsToProps(props)}
         data-iid={props.item._id}
         data-is-focusable>
-        <CardInfo source={props.source} item={props.item} hideTime />
+        <CardInfo
+            source={props.source}
+            item={props.item}
+            hideTime
+            badge={duplicatesBadge(props)}
+        />
         <div className="data">
             <span className="title">
                 <Highlights

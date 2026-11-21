@@ -69,6 +69,13 @@
         "notify": "Notifica se caricato in background",
         "dontNotify": "Non notificare"
     },
+    "duplicates": {
+        "header": "{count} copie da fonti diverse",
+        "headerIncomplete": "{count} copie da fonti diverse, finora",
+        "mayHaveMore": "Altre copie possono comparire caricando articoli meno recenti",
+        "unread": "non letto",
+        "menu": "Copie ({count})"
+    },
     "context": {
         "share": "Convidi",
         "read": "Leggi",

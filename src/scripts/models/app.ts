@@ -126,7 +126,8 @@ interface CloseContextMenuAction {
 
 interface OpenItemMenuAction {
     type: typeof OPEN_ITEM_MENU
-    event: MouseEvent
+    event?: MouseEvent
+    position?: [number, number]
     item: RSSItem
     feedId: string
 }
@@ -219,8 +220,18 @@ export function closeContextMenu(): AppThunk {
 export function openItemMenu(
     item: RSSItem,
     feedId: string,
-    event: React.MouseEvent
+    event: React.MouseEvent | React.KeyboardEvent
 ): ContextMenuActionTypes {
+    // From the keyboard, the menu opens below the focused card.
+    if ("key" in event) {
+        const rect = (event.currentTarget as Element).getBoundingClientRect()
+        return {
+            type: OPEN_ITEM_MENU,
+            position: [rect.left, rect.bottom],
+            item: item,
+            feedId: feedId,
+        }
+    }
     return {
         type: OPEN_ITEM_MENU,
         event: event.nativeEvent,
@@ -616,6 +627,7 @@ export function appReducer(
                 contextMenu: {
                     type: ContextMenuType.Item,
                     event: action.event,
+                    position: action.position,
                     target: [action.item, action.feedId],
                 },
             }

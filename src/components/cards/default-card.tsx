@@ -1,5 +1,6 @@
 import * as React from "react"
 import { Card } from "./card"
+import { duplicatesBadge } from "./duplicates"
 import CardInfo from "./info"
 import Highlights from "./highlights"
 import { SourceTextDirection } from "../../scripts/models/source"
@@ -25,7 +26,11 @@ const DefaultCard: React.FunctionComponent<Card.Props> = props => (
         {props.item.thumb ? (
             <img className="head" src={props.item.thumb} />
         ) : null}
-        <CardInfo source={props.source} item={props.item} />
+        <CardInfo
+            source={props.source}
+            item={props.item}
+            badge={duplicatesBadge(props)}
+        />
         <h3 className="title">
             <Highlights text={props.item.title} filter={props.filter} title />
         </h3>

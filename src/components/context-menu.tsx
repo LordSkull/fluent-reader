@@ -37,6 +37,9 @@ import {
     switchView,
     toggleFilter,
 } from "../scripts/models/page"
+import { groupOf, selectFeedView, shownId } from "../scripts/models/feed-view"
+import { Card } from "./cards/card"
+import { duplicateMenuItems } from "./cards/duplicates"
 
 export const shareSubmenu = (item: RSSItem): IContextualMenuItem[] => [
     { key: "qr", url: item.link, onRender: renderShareQR },
@@ -88,6 +91,55 @@ function ItemContextMenu() {
     const target = useAppSelector(state => state.app.contextMenu.target)
     const item = target[0] as RSSItem
     const feedId = target[1] as string
+    const view = useAppSelector(state =>
+        feedId ? selectFeedView(state, feedId) : null
+    )
+    const itemState = useAppSelector(state => state.items)
+    const sources = useAppSelector(state => state.sources)
+    const currentItem = useAppSelector(state => state.page.itemId)
+
+    // Copies of the article from other sources, each opened on its own.
+    const group = view && groupOf(view, item._id)
+    const copies = (group || [])
+        .map(id => ({
+            item: itemState[id],
+            source: sources[itemState[id]?.source],
+        }))
+        .filter(copy => copy.item && copy.source)
+    const duplicates: IContextualMenuItem[] =
+        copies.length > 1
+            ? [
+                  {
+                      key: "duplicates",
+                      text: intl.get("duplicates.menu", {
+                          count: copies.length,
+                      }),
+                      subMenuProps: {
+                          items: duplicateMenuItems(
+                              {
+                                  copies,
+                                  incomplete: view.incomplete.has(
+                                      shownId(view, item._id)
+                                  ),
+                              },
+                              currentItem,
+                              (copy, e) =>
+                                  Card.openArticle(
+                                      {
+                                          markRead: i => dispatch(markRead(i)),
+                                          showItem: (fid, i) =>
+                                              dispatch(showItem(fid, i)),
+                                      },
+                                      feedId,
+                                      copy.item,
+                                      copy.source,
+                                      e
+                                  )
+                          ),
+                      },
+                  },
+              ]
+            : []
 
     const menuItems: IContextualMenuItem[] = [
         {
@@ -108,6 +160,7 @@ function ItemContextMenu() {
                 globalThis.utils.openExternal(item.link, platformCtrl(e))
             },
         },
+        ...duplicates,
         {
             key: "markAsRead",
             text: item.hasRead

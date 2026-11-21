@@ -6,6 +6,15 @@ import { FeedFilter } from "../../scripts/models/feed"
 import { ViewConfigs } from "../../schema-types"
 
 export namespace Card {
+    // A copy of the article published by another source.
+    export type Copy = { item: RSSItem; source: RSSSource }
+    export type Duplicates = {
+        // Every copy, the shown article first.
+        copies: Copy[]
+        // More copies may be loaded with the next pages.
+        incomplete: boolean
+    }
+
     export type Props = {
         feedId: string
         item: RSSItem
@@ -13,6 +22,10 @@ export namespace Card {
         filter: FeedFilter
         selected?: boolean
         viewConfigs?: ViewConfigs
+        // Copies of the article from other sources, shown as one card.
+        duplicates?: Duplicates
+        // The open article, which may be any copy.
+        currentItem?: number
         shortcuts: (item: RSSItem, e: KeyboardEvent) => void
         markRead: (item: RSSItem) => void
         contextMenu: (feedId: string, item: RSSItem, e) => void
@@ -24,6 +37,23 @@ export namespace Card {
         window.utils.openExternal(props.item.link, platformCtrl(e))
     }
 
+    // Opens an article as clicking its card does, as configured for its own
+    // source. Only this article is marked as read.
+    export const openArticle = (
+        actions: Pick<Props, "markRead" | "showItem">,
+        feedId: string,
+        item: RSSItem,
+        source: RSSSource,
+        e?: React.MouseEvent | React.KeyboardEvent | MouseEvent | KeyboardEvent
+    ) => {
+        actions.markRead(item)
+        if (source.openTarget === SourceOpenTarget.External) {
+            window.utils.openExternal(item.link, Boolean(e && platformCtrl(e)))
+        } else {
+            actions.showItem(feedId, item)
+        }
+    }
+
     export const bindEventsToProps = (props: Props) => ({
         onClick: (e: React.MouseEvent) => onClick(props, e),
         onMouseUp: (e: React.MouseEvent) => onMouseUp(props, e),
@@ -33,17 +63,7 @@ export namespace Card {
     const onClick = (props: Props, e: React.MouseEvent) => {
         e.preventDefault()
         e.stopPropagation()
-        switch (props.source.openTarget) {
-            case SourceOpenTarget.External: {
-                openInBrowser(props, e)
-                break
-            }
-            default: {
-                props.markRead(props.item)
-                props.showItem(props.feedId, props.item)
-                break
-            }
-        }
+        openArticle(props, props.feedId, props.item, props.source, e)
     }
 
     const onMouseUp = (props: Props, e: React.MouseEvent) => {
@@ -58,7 +78,19 @@ export namespace Card {
         }
     }
 
+    // Shift+F10 and the Menu key open the menu of the focused card, as a
+    // right click does: it lists the copies of the article, if any.
+    export const isContextMenuKey = (e: React.KeyboardEvent | KeyboardEvent) =>
+        e.key === "ContextMenu" ||
+        (e.key === "F10" && e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey)
+
     const onKeyDown = (props: Props, e: React.KeyboardEvent) => {
+        if (isContextMenuKey(e)) {
+            e.preventDefault()
+            e.stopPropagation()
+            props.contextMenu(props.feedId, props.item, e)
+            return
+        }
         props.shortcuts(props.item, e.nativeEvent)
     }
 }

@@ -1,5 +1,6 @@
 import * as React from "react"
 import { Card } from "./card"
+import { duplicatesBadge } from "./duplicates"
 import CardInfo from "./info"
 import Highlights from "./highlights"
 import { SourceTextDirection } from "../../scripts/models/source"
@@ -39,7 +40,12 @@ const MagazineCard: React.FunctionComponent<Card.Props> = props => (
                     />
                 </p>
             </div>
-            <CardInfo source={props.source} item={props.item} showCreator />
+            <CardInfo
+                source={props.source}
+                item={props.item}
+                showCreator
+                badge={duplicatesBadge(props)}
+            />
         </div>
     </div>
 )
