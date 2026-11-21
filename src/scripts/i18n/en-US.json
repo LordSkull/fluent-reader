@@ -75,6 +75,13 @@
         "Vertical": "Vertical",
         "font": "Font"
     },
+    "duplicates": {
+        "header": "{count} copies from different sources",
+        "headerIncomplete": "{count} copies from different sources, so far",
+        "mayHaveMore": "More copies may appear as older articles load",
+        "unread": "unread",
+        "menu": "Copies ({count})"
+    },
     "context": {
         "share": "Share",
         "read": "Read",

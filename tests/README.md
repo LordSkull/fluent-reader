@@ -1,4 +1,14 @@
-# Private end-to-end tests
+# Tests
+
+This directory holds three kinds of tests. Keep them apart.
+
+| Directory | What | Tracked here |
+|---|---|---|
+| `tests/e2e` | Private upstream end-to-end tests (git submodule) | Only the submodule pointer |
+| `tests/fork` | Public tests specific to this fork, on synthetic data | Yes |
+| `tests/main` | Optional local tests, excluded from Git | No |
+
+## `tests/e2e`: private upstream end-to-end tests
 
 The optional `e2e` submodule is maintained in the private
 `yang991178/fluent-reader-tests` repository. Normal installs, builds, and release
@@ -16,5 +26,46 @@ npm --prefix tests/e2e test
 
 See `tests/e2e/README.md` for the harness architecture and diagnostics. Commit
 and push test changes in the private repository before publishing an updated
-submodule pointer here. Never add test sources or reports directly to this
-public repository.
+submodule pointer here. Never add the sources or reports of these private
+tests directly to this public repository.
+
+## `tests/fork`: public tests of this fork
+
+These tests cover features of this fork. They are public and use only
+synthetic data, temporary in-memory databases and temporary profiles. They
+need only the files tracked in this repository and the packages that a normal
+`npm install` (or `npm ci`) installs, `electron` and `esbuild` included. They
+never read personal data, a real profile, the network or `tests/main`.
+
+Each runner finds the repository root from its own location, so no absolute
+path is involved.
+
+### `cross-source-duplicates`
+
+This directory tests copies of the same article across RSS sources
+(`src/scripts/duplicates.ts`). The conformance cases are read from the public
+contract, `contracts/cross-source-duplicates/conformance.json` (`../../..`
+from the suite). Do not copy them here.
+
+From the repository root (no build needed):
+
+```sh
+npm install
+npm run test:duplicates            # identity, contract, grouping, feeds
+npm run test:duplicates:keyboard   # keyboard and accessibility, in Electron
+```
+
+- `run.js` bundles `suite.ts` with esbuild and runs it with Electron's Node
+  runtime (`ELECTRON_RUN_AS_NODE`), because `better-sqlite3` loads its
+  Node-API prebuild there as in the app. `setup.ts` provides an in-memory
+  SQLite database with the migrations of `dist/drizzle` and stubbed bridges.
+- `keyboard/run.js` bundles the real list feed, cards and context menu into a
+  page and opens it in one hidden Electron window. The window uses a
+  temporary profile, which is always deleted, an in-memory session and a
+  stubbed database. Keys are trusted input events (`sendInputEvent`). Set
+  `FR_KBD_SHOW=1` to see the window.
+
+## `tests/main`: local tests
+
+`tests/main` may hold local, machine-specific tests. It is excluded through
+`.git/info/exclude` and is never published. No public test may depend on it.

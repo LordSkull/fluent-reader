@@ -1,5 +1,6 @@
 import * as React from "react"
 import { Card } from "./card"
+import { duplicatesBadge } from "./duplicates"
 import CardInfo from "./info"
 import Highlights from "./highlights"
 import { ViewConfigs } from "../../schema-types"
@@ -27,7 +28,11 @@ const ListCard: React.FunctionComponent<Card.Props> = props => (
             </div>
         ) : null}
         <div className="data">
-            <CardInfo source={props.source} item={props.item} />
+            <CardInfo
+                source={props.source}
+                item={props.item}
+                badge={duplicatesBadge(props)}
+            />
             <h3 className="title">
                 <Highlights
                     text={props.item.title}

@@ -1,9 +1,11 @@
 import * as React from "react"
-import { useCallback } from "react"
+import { useCallback, useMemo } from "react"
 import { RSSItem, markRead, itemShortcuts } from "../../scripts/models/item"
 import { openItemMenu } from "../../scripts/models/app"
 import { RSSFeed, FeedFilter, loadMore } from "../../scripts/models/feed"
 import { showItem } from "../../scripts/models/page"
+import { selectFeedView } from "../../scripts/models/feed-view"
+import { Card } from "../cards/card"
 import { useAppSelector, useAppDispatch } from "../../scripts/reducer"
 import { ViewType, ViewConfigs } from "../../schema-types"
 import CardsFeed from "./cards-feed"
@@ -13,7 +15,10 @@ export type FeedProps = {
     feed: RSSFeed
     viewType: ViewType
     viewConfigs?: ViewConfigs
+    // The entries shown: copies of the same article are one entry.
     items: RSSItem[]
+    // Copies of an entry's article, if it has any.
+    duplicates: (item: RSSItem) => Card.Duplicates | undefined
     currentItem: number
     sourceMap: Object
     filter: FeedFilter
@@ -33,10 +38,29 @@ export const Feed: React.FC<FeedOwnProps> = ({ feedId, viewType }) => {
     const dispatch = useAppDispatch()
 
     const feed = useAppSelector(s => s.feeds[feedId])
-    const items = useAppSelector(s =>
-        s.feeds[feedId] ? s.feeds[feedId].iids.map(iid => s.items[iid]) : []
-    )
+    const view = useAppSelector(s => selectFeedView(s, feedId))
+    const itemState = useAppSelector(s => s.items)
     const sourceMap = useAppSelector(s => s.sources)
+    const items = useMemo(
+        () => (view ? view.visible.map(iid => itemState[iid]) : []),
+        [view, itemState]
+    )
+    const duplicates = useCallback(
+        (item: RSSItem): Card.Duplicates | undefined => {
+            const ids = view?.groups.get(item._id)
+            if (!ids) return undefined
+            const copies = ids
+                .map(id => ({
+                    item: itemState[id],
+                    source: sourceMap[itemState[id]?.source],
+                }))
+                .filter(copy => copy.item && copy.source)
+            return copies.length > 1
+                ? { copies, incomplete: view.incomplete.has(item._id) }
+                : undefined
+        },
+        [view, itemState, sourceMap]
+    )
     const filter = useAppSelector(s => s.page.filter)
     const viewConfigs = useAppSelector(s => s.page.viewConfigs)
     const currentItem = useAppSelector(s => s.page.itemId)
@@ -67,6 +91,7 @@ export const Feed: React.FC<FeedOwnProps> = ({ feedId, viewType }) => {
         viewType,
         viewConfigs,
         items,
+        duplicates,
         currentItem,
         sourceMap,
         filter,

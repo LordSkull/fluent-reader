@@ -16,6 +16,7 @@ import { SourceActionTypes, DELETE_SOURCE } from "./source"
 import { toggleMenu } from "./app"
 import { ViewType, ViewConfigs } from "../../schema-types"
 import { RootState } from "../reducer"
+import { selectFeedView, shownId } from "./feed-view"
 
 export const SELECT_PAGE = "SELECT_PAGE"
 export const SWITCH_VIEW = "SWITCH_VIEW"
@@ -196,15 +197,18 @@ export const toggleSearch = (): AppThunk => {
     }
 }
 
+// Offsets count the entries a feed shows: a group of copies of the same
+// article is one entry, whichever copy is open.
 function getOffsetItemIndex(state: RootState, offset: number): number | null {
     const { itemId, feedId, itemFromFeed } = state.page
     const feed = state.feeds[feedId]
     if (!itemFromFeed || !feed || !state.items[itemId]) return null
-    const itemIndex = feed.iids.indexOf(itemId)
+    const view = selectFeedView(state, feedId)
+    const itemIndex = view.visible.indexOf(shownId(view, itemId))
     if (itemIndex >= 0) return itemIndex + offset
 
     const item = state.items[itemId]
-    const prevs = feed.iids
+    const prevs = view.visible
         .map((id, index) => [state.items[id], index] as [RSSItem, number])
         .filter(([i, _]) => i.date > item.date)
     if (prevs.length === 0) return offset - 1
@@ -219,7 +223,8 @@ export function canShowOffsetItem(state: RootState, offset: number): boolean {
     const index = getOffsetItemIndex(state, offset)
     if (index === null || index < 0) return false
     const feed = state.feeds[state.page.feedId]
-    return index < feed.iids.length || (!feed.allLoaded && !feed.loading)
+    const view = selectFeedView(state, state.page.feedId)
+    return index < view.visible.length || (!feed.allLoaded && !feed.loading)
 }
 
 export function showOffsetItem(offset: number): AppThunk<Promise<void>> {
@@ -229,8 +234,9 @@ export function showOffsetItem(offset: number): AppThunk<Promise<void>> {
         const feedId = state.page.feedId
         const feed = state.feeds[feedId]
         const index = getOffsetItemIndex(state, offset)
-        if (index < feed.iids.length) {
-            const item = state.items[feed.iids[index]]
+        const visible = selectFeedView(state, feedId).visible
+        if (index < visible.length) {
+            const item = state.items[visible[index]]
             dispatch(markRead(item))
             dispatch(showItem(feedId, item))
             return
@@ -244,6 +250,8 @@ export function showOffsetItem(offset: number): AppThunk<Promise<void>> {
         const nextState = getState()
         const nextFeed = nextState.feeds[feedId]
         // An exhausted/failed page or a changed selection must keep the current article.
+        // A page made only of copies of shown articles adds records but no
+        // entry: the next attempt loads the following page.
         if (
             nextState.page !== state.page ||
             nextFeed?.filter !== feed.filter ||

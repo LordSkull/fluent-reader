@@ -18,7 +18,9 @@
     "package-win-ci": "electron-builder -w --x64 -p never",
     "package-mac": "electron-builder --mac --universal",
     "package-mas": "bash build/resignAndPackage.sh",
-    "package-linux": "electron-builder --linux --x64 -p never"
+    "package-linux": "electron-builder --linux --x64 -p never",
+    "test:duplicates": "node tests/fork/cross-source-duplicates/run.js",
+    "test:duplicates:keyboard": "node tests/fork/cross-source-duplicates/keyboard/run.js"
   },
   "keywords": [],
   "author": "Haoyuan Liu",
@@ -63,6 +65,7 @@
     "electron-builder": "^26.15.3",
     "electron-react-devtools": "^0.5.3",
     "electron-store": "^12.0.0",
+    "esbuild": "0.25.12",
     "events": "^3.3.0",
     "font-list": "^1.4.2",
     "html-webpack-plugin": "^5.5.3",
