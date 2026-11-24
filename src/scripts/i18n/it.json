@@ -66,6 +66,7 @@
         "fontSize": "Dimensione testo",
         "loadWebpage": "Carica pagina",
         "loadFull": "Carica tutto il contenuto",
+        "fullContentIncomplete": "Fluent Reader non ha potuto verificare che questo sia l’intero articolo. Per leggerlo per intero, usa Carica pagina.",
         "notify": "Notifica se caricato in background",
         "dontNotify": "Non notificare"
     },

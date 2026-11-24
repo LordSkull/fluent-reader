@@ -20,7 +20,8 @@
     "package-mas": "bash build/resignAndPackage.sh",
     "package-linux": "electron-builder --linux --x64 -p never",
     "test:duplicates": "node tests/fork/cross-source-duplicates/run.js",
-    "test:duplicates:keyboard": "node tests/fork/cross-source-duplicates/keyboard/run.js"
+    "test:duplicates:keyboard": "node tests/fork/cross-source-duplicates/keyboard/run.js",
+    "test:full-content": "node tests/fork/article-full-content/run.js"
   },
   "keywords": [],
   "author": "Haoyuan Liu",

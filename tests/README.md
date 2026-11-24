@@ -65,6 +65,29 @@ npm run test:duplicates:keyboard   # keyboard and accessibility, in Electron
   stubbed database. Keys are trusted input events (`sendInputEvent`). Set
   `FR_KBD_SHOW=1` to see the window.
 
+### `article-full-content`
+
+This directory tests "Load full content" on synthetic fixtures with invented
+text (`fixtures/`), never on a live site.
+
+```sh
+npm install
+npm run test:full-content
+```
+
+- `main.js` opens the real `dist/article/article.html`, with its CSP and SRI,
+  in a hidden Electron window and gives it each fixture as the article
+  webview receives it: an Ars Technica article in several blocks, an
+  unrecognized and a paginated Ars page, ANSA, another domain and RSS mode.
+  It checks the text, the allowed elements, attributes and links, the
+  incompleteness notice, and that no page script runs. Every request that is
+  not a local file is blocked, and none may happen.
+- `hook-page.tsx` mounts the real `useArticleView` hook with stubbed bridges
+  (`stubs.ts`) and a stubbed `fetch`: HTTP 403 is an error, HTTP 200 passes
+  the whole page on, RSS mode makes no request, and nothing is written.
+- The windows use a temporary profile, which is always deleted, and
+  in-memory sessions.
+
 ## `tests/main`: local tests
 
 `tests/main` may hold local, machine-specific tests. It is excluded through
