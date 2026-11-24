@@ -67,6 +67,7 @@
         "fontSize": "Font size",
         "loadWebpage": "Load webpage",
         "loadFull": "Load full content",
+        "fullContentIncomplete": "Fluent Reader could not confirm that this is the whole article. To read it in full, use Load webpage.",
         "notify": "Notify if fetched in background",
         "dontNotify": "Don't notify",
         "textDir": "Text direction",

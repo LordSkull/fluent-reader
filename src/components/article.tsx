@@ -345,9 +345,9 @@ function Article({ itemId, side = false }: ArticleProps) {
         )
         return `article/article.html?a=${a}&h=${h}&f=${encodeURIComponent(
             fontFamily
-        )}&s=${fontSize}&d=${source.textDir}&u=${item.link}&m=${
-            loadFull ? 1 : 0
-        }`
+        )}&s=${fontSize}&d=${source.textDir}&n=${encodeURIComponent(
+            intl.get("article.fullContentIncomplete")
+        )}&u=${item.link}&m=${loadFull ? 1 : 0}`
     }
 
     return (
